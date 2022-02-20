@@ -5,7 +5,7 @@ The objective of CollectiveFS is to create a public file system where users can 
 The cloud is a cluster of servers owned by a single entity. Typically, their motive is to collect payments directly or from 3rd parties which creates additional risks. CollectiveFS serves to be a public alternative to private cloud storage.
 
 # Similar Projects
-IPFS - Aims to replace IP based HTTP websites with content addressed ones hosted by p2p clusters. They introduce the concept of pinning where you can prioritize data. On CollectiveFS, each byte is as valued as any other byte on the network and parity can be configured so users can choose their desired level of fault tolerance against data erasures. IPFS also uses version control to track file history. On CollectiveFS, there is no version control although this can be implemented on the user level if they want such a feature.
+IPFS - Aims to replace IP based HTTP websites with content addressed ones hosted by p2p clusters. They introduce the concept of pinning where you can prioritize data. On CollectiveFS, each byte is as valued as any other byte on the network and parity can be configured so users can choose their desired level of fault tolerance against data erasures. IPFS also uses version control to track file history. On CollectiveFS, there is no version control although this can be implemented at the user level.
 
 Hadoop - A distributed file system (HDFS) for big data. Used at companies like Facebook. Hadoop must be configured from the top down by a single entity where CollectiveFS is built from the bottom up by the individual nodes.
 
