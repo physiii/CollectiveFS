@@ -1,0 +1,28 @@
+#!/usr/bin/bash
+filename="Peterson_Questioning_Sam_Harris_Sam_Harris.mp4"
+
+rm -rf *.gpg
+
+echo "$(date +%H:%M:%S) Encrypting chunks..."
+
+start=$(date +"%s")
+for file in *.mp4.*
+  do gpg --yes --encrypt -r andy@pyfi.org $file;
+done
+finish=$(date +"%s")
+
+math=$((finish-start))
+echo "$(date +%H:%M:%S) Done in ${math}s."
+
+######################
+
+rm -rf *.gpg
+
+echo "$(date +%H:%M:%S) Encrypting file..."
+
+start=$(date +"%s")
+gpg --yes --encrypt -r andy@pyfi.org ${filename};
+finish=$(date +"%s")
+
+math=$((finish-start))
+echo "$(date +%H:%M:%S) Done in ${math}s."
