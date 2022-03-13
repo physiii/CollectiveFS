@@ -7,7 +7,7 @@ echo "$(date +%H:%M:%S) Encrypting chunks..."
 
 start=$(date +"%s")
 for file in *.mp4.*
-  do gpg --yes --encrypt -r andy@pyfi.org $file;
+  do gpg --yes --encrypt -r test@example.com $file;
 done
 finish=$(date +"%s")
 
@@ -21,7 +21,7 @@ rm -rf *.gpg
 echo "$(date +%H:%M:%S) Encrypting file..."
 
 start=$(date +"%s")
-gpg --yes --encrypt -r andy@pyfi.org ${filename};
+gpg --yes --encrypt -r test@example.com ${filename};
 finish=$(date +"%s")
 
 math=$((finish-start))
