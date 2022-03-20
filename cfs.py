@@ -10,33 +10,53 @@ import shutil
 import shlex
 import subprocess
 import threading
+from os.path import exists
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 from watchdog.events import LoggingEventHandler
+from cryptography.fernet import Fernet
 
-CollectiveConfig = "/home/andy/.collective/config"
+ConfigDir = "/home/andy/.collective/"
+ConfigFile = ConfigDir + "config"
+KeyFile = ConfigDir + "key"
 
 def sendChunk():
-    print('Sending chunk to peer.')
+		print('Sending chunk to peer.')
 
-def getEncryptInfo():
-    return 'data'
+def decryptChunk(path):
+	# using the key
+	fernet = Fernet(key)
+
+	# opening the encrypted file
+	with open(path, 'rb') as enc_file:
+		encrypted = enc_file.read()
+
+	# decrypting the file
+	decrypted = fernet.decrypt(encrypted)
+
+	# opening the file in write mode and
+	# writing the decrypted data
+	with open(path, 'wb') as dec_file:
+		dec_file.write(decrypted)
 
 def encryptChunk(path):
-	cmd = "gpg --yes --encrypt -r test@example.com " + path
-	cmd = shlex.split(cmd)
-	proc = subprocess.run(cmd)
-	subprocess.CompletedProcess(sendChunk(), 1)
-	print('Encrypting chunk.', cmd, path)
+	# opening the original file to encrypt
+	with open(path, 'rb') as file:
+		original = file.read()
+
+	# encrypting the file
+	encrypted = fernet.encrypt(original)
+	with open(path, 'wb') as encrypted_file:
+		encrypted_file.write(encrypted)
+
+	print('Encrypting chunk.', path)
 
 def encryptChunks(fileFolder):
 	for filename in os.scandir(fileFolder):
-	    if filename.is_file():
-		    tasks = [encryptChunk(fileFolder + "/" + filename.name)]
-		    data = getEncryptInfo()
-		    for task in tasks:
-		        t = threading.Thread(target=task, args=(data,))
-		        t.start()
+		if filename.is_file():
+			filePath = fileFolder + "/" + filename.name
+			t = threading.Thread(target=encryptChunk, args=(filePath,))
+			t.start()
 
 class ModifiedDirHandler(FileSystemEventHandler):
 
@@ -70,12 +90,12 @@ class ModifiedDirHandler(FileSystemEventHandler):
 
 	# def on_modified(self, event):
 	# 	print('Modified: ', event);
-
-	def on_moved(self, event):
-		print('Moved: ', event);
-
-	def on_deleted(self, event):
-		print('Deleted: ', event);
+	#
+	# def on_moved(self, event):
+	# 	print('Moved: ', event);
+	#
+	# def on_deleted(self, event):
+	# 	print('Deleted: ', event);
 
 def makeFolder(path):
 	try:
@@ -83,11 +103,11 @@ def makeFolder(path):
 	except OSError as error:
 			pass
 
-def path_to_dict(path):
+def pathToDict(path):
 	d = {'name': os.path.basename(path)}
 	if os.path.isdir(path):
 			d['type'] = "directory"
-			d['children'] = [path_to_dict(os.path.join(path,x)) for x in os.listdir\
+			d['children'] = [pathToDict(os.path.join(path,x)) for x in os.listdir\
 (path)]
 	else:
 			d['type'] = "file"
@@ -106,7 +126,7 @@ if __name__ == "__main__":
 	if args.verbose:
 		logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
 
-	f = open(CollectiveConfig, "r")
+	f = open(ConfigFile, "r")
 	rootPath = f.readline().rstrip('\n')
 	collectivePath = rootPath + '/.collective'
 	processPath = rootPath + '/.collective/proc'
@@ -114,7 +134,7 @@ if __name__ == "__main__":
 	publicPath = rootPath + '/.collective/public'
 	treeFilePath = rootPath + '/.collective/tree'
 
-	tree = json.dumps(path_to_dict(rootPath), indent=2)
+	tree = json.dumps(pathToDict(rootPath), indent=2)
 	treeFile = open(treeFilePath, "w")
 
 	programPath = os.path.dirname(os.path.abspath(__file__))
@@ -123,6 +143,20 @@ if __name__ == "__main__":
 	makeFolder(processPath)
 	makeFolder(cachePath)
 	makeFolder(publicPath)
+
+	# key generation and storage
+	if exists(KeyFile):
+		# opening the key
+		with open(KeyFile, 'rb') as filekey:
+				key = filekey.read()
+		print('Found key.')
+	else:
+		key = Fernet.generate_key()
+		with open(KeyFile, 'wb') as filekey:
+			filekey.write(key)
+		print('Creating new key.')
+	# using the generated key
+	fernet = Fernet(key)
 
 	event_handler = ModifiedDirHandler()
 	observer = Observer()
