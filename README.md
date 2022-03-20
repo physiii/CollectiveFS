@@ -10,3 +10,11 @@ IPFS - Aims to replace IP based HTTP websites with content addressed ones hosted
 Hadoop - A distributed file system (HDFS) for big data. Used at companies like Facebook. Hadoop must be configured from the top down by a single entity where CollectiveFS is built from the bottom up by the individual nodes.
 
 Syncthing - Synchronizes files over many nodes using p2p. Only synchronizes between nodes you own therefor is not public.
+
+
+Saving a file:
+![Alt text](/images/CollectiveFS_save_file.png?raw=true "Saving files")
+
+
+Getting a file:
+![Alt text](/images/CollectiveFS_get_file.png?raw=true "Saving files")
