@@ -12,9 +12,9 @@ Hadoop - A distributed file system (HDFS) for big data. Used at companies like F
 Syncthing - Synchronizes files over many nodes using p2p. Only synchronizes between nodes you own therefor is not public.
 
 
-Saving a file:
+## Saving a file 
 ![Alt text](/images/CollectiveFS_save_file.png?raw=true "Saving files")
 
 
-Getting a file:
+## Getting a file:
 ![Alt text](/images/CollectiveFS_get_file.png?raw=true "Saving files")
