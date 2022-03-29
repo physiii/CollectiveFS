@@ -4,7 +4,7 @@ The objective of CollectiveFS is to create a public file system where users can 
 # Description
 The cloud is a cluster of servers owned by a single entity. Typically, their motive is to collect payments directly or from 3rd parties which creates additional risks. CollectiveFS serves to be a public alternative to privately owned cloud storage.
 
-# Hiding in Plain Sight
+# Hidden in Plain Sight
 File chunks are exchanged with untrusted peers but are encrypted. Symetric keys are used since the encryptor/decryptor are the same entity.
 
 # Similar Projects
