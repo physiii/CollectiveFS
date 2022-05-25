@@ -1,0 +1,1 @@
+[{"resources": {"dut": "any_ts", "endpoint1": "multistream_endpoint", "endpoint2": "multistream_endpoint"}}, {"action": "create_conference", "serverName": "dut", "conferenceName": "GURU_SLAVE_TS"}, {"action": "dial_out_ep", "serverName": "dut", "confName": "GURU_SLAVE_TS", "epName": "endpoint1"}]

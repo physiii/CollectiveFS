@@ -1,5 +1,6 @@
 #!/usr/bin/python
 
+import uuid
 import argparse
 import logging
 import time
@@ -10,15 +11,60 @@ import shutil
 import shlex
 import subprocess
 import threading
+import filexfer.filexfer as transfer
+
 from os.path import exists
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 from watchdog.events import LoggingEventHandler
 from cryptography.fernet import Fernet
 
+from http.server import BaseHTTPRequestHandler, HTTPServer
+
+import simplejson
+import random
+
 ConfigDir = "/home/andy/.collective/"
 ConfigFile = ConfigDir + "config"
 KeyFile = ConfigDir + "key"
+
+HOST_NAME = 'localhost'
+PORT_NUMBER = 8080
+
+class ServerReqHandler(BaseHTTPRequestHandler):
+    def _set_headers(self):
+        self.send_response(200)
+        self.send_header('Content-type', 'text/html')
+        self.end_headers()
+
+    def do_GET(self):
+        self._set_headers()
+        f = open("index.html", "rb")
+        self.wfile.write(f.read())
+
+    def do_HEAD(self):
+        self._set_headers()
+
+    def do_POST(self):
+        self._set_headers()
+        print("in post method")
+        self.data_string = self.rfile.read(int(self.headers['Content-Length']))
+
+        self.send_response(200)
+        self.end_headers()
+
+        data = simplejson.loads(self.data_string)
+        with open("test123456.json", "w") as outfile:
+            simplejson.dump(data, outfile)
+        print("{}".format(data))
+        f = open("for_presen.py")
+        self.wfile.write(f.read())
+        return
+
+def run_server():
+	httpd = HTTPServer((HOST_NAME, PORT_NUMBER), ServerReqHandler)
+	t = threading.Thread(target=httpd.serve_forever)
+	t.start()
 
 def sendChunk():
 		print('Sending chunk to peer.')
@@ -39,24 +85,42 @@ def decryptChunk(path):
 	with open(path, 'wb') as dec_file:
 		dec_file.write(decrypted)
 
-def encryptChunk(path):
+def encryptChunk(fileInfo, chunkInfo):
 	# opening the original file to encrypt
-	with open(path, 'rb') as file:
+	with open(chunkInfo['path'], 'rb') as file:
 		original = file.read()
 
 	# encrypting the file
 	encrypted = fernet.encrypt(original)
-	with open(path, 'wb') as encrypted_file:
+	with open(chunkInfo['path'], 'wb') as encrypted_file:
 		encrypted_file.write(encrypted)
 
-	print('Encrypting chunk.', path)
+	# t = threading.Thread(target=transfer.start_transfer, args=("send", fileInfo, chunkInfo))
+	# t.start()
+	transfer.start_transfer("send", fileInfo, chunkInfo)
 
-def encryptChunks(fileFolder):
+	print('Encrypted chunk.', filePath)
+
+def encryptChunks(fileInfo):
+	fileFolder = fileInfo['folder']
 	for filename in os.scandir(fileFolder):
 		if filename.is_file():
+			chunkNum = int(os.path.splitext(filename.name)[1][1:])
 			filePath = fileFolder + "/" + filename.name
-			t = threading.Thread(target=encryptChunk, args=(filePath,))
+			chunkInfo = {
+				"num": chunkNum,
+				"id": str(uuid.uuid4()),
+				"path": filePath,
+				"offer": {},
+				"answer": {}
+			}
+			fileInfo['chunks'].insert(chunkNum, chunkInfo)
+			t = threading.Thread(target=encryptChunk, args=(fileInfo, chunkInfo))
 			t.start()
+	print(json.dumps(fileInfo))
+
+def finishedEncoding(fileInfo):
+	encryptChunks(fileInfo)
 
 class ModifiedDirHandler(FileSystemEventHandler):
 
@@ -69,22 +133,36 @@ class ModifiedDirHandler(FileSystemEventHandler):
 			fileDirPath += fileName[dir] + '/'
 
 		fileName = fileName[len(fileName) - 1]
+
 		# filePathRel = event.src_path
-		destPath = processPath
 		if filePath.find('.collective') < 0 and not event.is_directory:
 			try:
+				numOfDataChunks = 64 #128
+				numOfParChunks =  32 #64
+				id = uuid.uuid4();
 				fileFolder = processPath + filePathRel + '.d'
+				# fileFolder = processPath + '/' + str(id)
 				makeFolder(fileFolder)
 				encoderPath = programPath + '/lib/encoder'
-				encoderCmd = encoderPath + " --data 128 --par 64 --out " + "\"" + fileFolder + "\" \"" + filePath + "\""
+				encoderCmd = encoderPath + " --data " + str(numOfDataChunks) + " --par " + str(numOfParChunks) + " --out " + "\"" + fileFolder + "\" \"" + filePath + "\""
 				encoderCmd = shlex.split(encoderCmd)
 				encoder = subprocess.run(encoderCmd)
-				subprocess.CompletedProcess(encryptChunks(fileFolder), 1)
+
+				num = numOfParChunks + numOfDataChunks
+				fileInfo = {
+					"id": str(id),
+					"name": fileName,
+					"folder": fileFolder,
+					"number_of_chunks": num,
+					"chunks": []
+				}
+
+				subprocess.CompletedProcess(finishedEncoding(fileInfo), 1)
 				# for line in encoder.stdout:
 				# 	if line:
 				# 		print(line)
 			except shutil.SameFileError:
-				print('Source and destination are the same file', event, filePath, destPath)
+				print('Source and destination are the same file', event, filePath, processPath)
 				pass
 			# print('Created: ', event, filePath, destPath)
 
@@ -135,7 +213,7 @@ if __name__ == "__main__":
 	treeFilePath = rootPath + '/.collective/tree'
 
 	tree = json.dumps(pathToDict(rootPath), indent=2)
-	treeFile = open(treeFilePath, "w")
+	# treeFile = open(treeFilePath, "w")
 
 	programPath = os.path.dirname(os.path.abspath(__file__))
 
@@ -157,6 +235,8 @@ if __name__ == "__main__":
 		print('Creating new key.')
 	# using the generated key
 	fernet = Fernet(key)
+
+	run_server()
 
 	event_handler = ModifiedDirHandler()
 	observer = Observer()
