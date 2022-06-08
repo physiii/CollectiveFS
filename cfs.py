@@ -95,11 +95,12 @@ def encryptChunk(fileInfo, chunkInfo):
 	with open(chunkInfo['path'], 'wb') as encrypted_file:
 		encrypted_file.write(encrypted)
 
+	print('Encrypted chunk.', chunkInfo['path'])
 	# t = threading.Thread(target=transfer.start_transfer, args=("send", fileInfo, chunkInfo))
 	# t.start()
-	transfer.start_transfer("send", fileInfo, chunkInfo)
+	offer = transfer.start_transfer("send", fileInfo, chunkInfo)
+	print("MADE OFFER FOR CHUNK: ", offer)
 
-	print('Encrypted chunk.', filePath)
 
 def encryptChunks(fileInfo):
 	fileFolder = fileInfo['folder']
@@ -137,8 +138,8 @@ class ModifiedDirHandler(FileSystemEventHandler):
 		# filePathRel = event.src_path
 		if filePath.find('.collective') < 0 and not event.is_directory:
 			try:
-				numOfDataChunks = 64 #128
-				numOfParChunks =  32 #64
+				numOfDataChunks = 8 #128
+				numOfParChunks =  4 #64
 				id = uuid.uuid4();
 				fileFolder = processPath + filePathRel + '.d'
 				# fileFolder = processPath + '/' + str(id)

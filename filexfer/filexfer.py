@@ -84,6 +84,7 @@ async def run_offer(pc, signaling, fp):
     await signaling.send(pc.localDescription)
 
     await consume_signaling(pc, signaling)
+    return pc.localDescription
 
 def get_or_create_eventloop():
     try:
@@ -130,3 +131,4 @@ def start_transfer(direction, fileInfo, chunkInfo):
         fp.close()
         loop.run_until_complete(pc.close())
         loop.run_until_complete(signaling.close())
+    return "!! THIS IS A TEST !!"
