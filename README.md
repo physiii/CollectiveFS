@@ -19,6 +19,7 @@ Syncthing - Synchronizes files over many nodes using p2p. Only synchronizes betw
 WebRTC  
 Symmetric Enecryption (Fernet)  
 Encoding (ReedSolomon)  
+FUSE  
 
 ## Saving a file 
 ![Alt text](/images/CollectiveFS_save_file.png?raw=true "Saving files")
