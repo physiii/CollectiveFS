@@ -1,5 +1,5 @@
 # Objective
-The objective of CollectiveFS is to create a public file system where users can store personal files. 
+The objective of CollectiveFS is to create a public file system where users can store personal files. I draw from protocols such as BitTorrent and BitCoin to create resilant distributed networks.
 
 # Description
 The cloud is a cluster of servers owned by a single entity. Typically, their motive is to collect payments directly or from 3rd parties which creates reliability and security risks. CollectiveFS serves to be a public alternative to privately owned cloud storage. Control is distributed among entities who choose to provide disc space in exchange for having their files on the network.
@@ -14,6 +14,11 @@ Hadoop - A distributed file system (HDFS) for big data. Used at companies like F
 
 Syncthing - Synchronizes files over many nodes using p2p. Only synchronizes between nodes you own therefor is not public.
 
+
+# Technologies
+WebRTC  
+Symmetric Enecryption (Fernet)  
+Encoding (ReedSolomon)  
 
 ## Saving a file 
 ![Alt text](/images/CollectiveFS_save_file.png?raw=true "Saving files")
