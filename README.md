@@ -17,7 +17,7 @@ Syncthing - Synchronizes files over many nodes using p2p. Only synchronizes betw
 
 # Technologies
 WebRTC  
-Symmetric Enecryption (Fernet)  
+Symmetric Encryption (Fernet)  
 Encoding (ReedSolomon)  
 FUSE  
 
