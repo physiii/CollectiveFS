@@ -1,0 +1,84 @@
+services:
+  node1:
+    build: .
+    container_name: cfs-node1
+    ports:
+      - "8001:8000"
+    volumes:
+      - cfs_node1_data:/data/.collective
+      - ./lib:/app/lib:ro
+    environment:
+      - NODE_ID=node1
+      - COLLECTIVE_PATH=/data/.collective
+      - ENCODER_PATH=/app/lib/encoder
+      - DECODER_PATH=/app/lib/decoder
+      - OWN_URL=http://node1:8000
+      - PEER_URLS=http://node2:8000,http://node3:8000
+    networks:
+      - cfs_cluster
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8000/api/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+
+  node2:
+    build: .
+    container_name: cfs-node2
+    ports:
+      - "8002:8000"
+    volumes:
+      - cfs_node2_data:/data/.collective
+      - ./lib:/app/lib:ro
+    environment:
+      - NODE_ID=node2
+      - COLLECTIVE_PATH=/data/.collective
+      - ENCODER_PATH=/app/lib/encoder
+      - DECODER_PATH=/app/lib/decoder
+      - OWN_URL=http://node2:8000
+      - PEER_URLS=http://node1:8000,http://node3:8000
+    networks:
+      - cfs_cluster
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8000/api/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+
+  node3:
+    build: .
+    container_name: cfs-node3
+    ports:
+      - "8003:8000"
+    volumes:
+      - cfs_node3_data:/data/.collective
+      - ./lib:/app/lib:ro
+    environment:
+      - NODE_ID=node3
+      - COLLECTIVE_PATH=/data/.collective
+      - ENCODER_PATH=/app/lib/encoder
+      - DECODER_PATH=/app/lib/decoder
+      - OWN_URL=http://node3:8000
+      - PEER_URLS=http://node1:8000,http://node2:8000
+    networks:
+      - cfs_cluster
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8000/api/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+
+networks:
+  cfs_cluster:
+    driver: bridge
+
+volumes:
+  cfs_node1_data:
+  cfs_node2_data:
+  cfs_node3_data:

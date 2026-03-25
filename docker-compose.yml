@@ -1,0 +1,25 @@
+version: '3.8'
+
+services:
+  collectivefs:
+    build: .
+    ports:
+      - "8000:8000"
+    volumes:
+      - collective_data:/data/.collective
+      - ./lib:/app/lib:ro
+    environment:
+      - COLLECTIVE_PATH=/data/.collective
+      - ENCODER_PATH=/app/lib/encoder
+      - DECODER_PATH=/app/lib/decoder
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+volumes:
+  collective_data:
+    driver: local
