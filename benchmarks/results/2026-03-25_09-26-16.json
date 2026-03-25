@@ -1,0 +1,1029 @@
+{
+  "suite": "CollectiveFS Benchmark Suite",
+  "wall_time_seconds": 0.94,
+  "system": {
+    "python_version": "3.12.3 (main, Mar  3 2026, 12:15:18) [GCC 13.3.0]",
+    "os": "Linux-6.11.0-29-generic-x86_64-with-glibc2.39",
+    "cpu_count_logical": 24,
+    "cpu_count_physical": 16,
+    "ram_total_gb": 62.54,
+    "ram_available_gb": 20.62,
+    "hostname": "office",
+    "machine": "x86_64",
+    "encoder_path": "/home/andy/code/CollectiveFS/lib/encoder",
+    "decoder_path": "/home/andy/code/CollectiveFS/lib/decoder"
+  },
+  "config": {
+    "suites": [
+      "crypto",
+      "journal"
+    ],
+    "iterations": 1,
+    "sizes": [
+      "64KB",
+      "256KB",
+      "1MB"
+    ]
+  },
+  "performance_summary": {
+    "best_read_mbps": 0.0,
+    "best_write_mbps": 0.0,
+    "best_encode_mbps": 0.0,
+    "best_pipeline_mbps": 0.0,
+    "sharding_parallel_speedup": null,
+    "enc_overhead_vs_raw_pct": null,
+    "recovery_4_missing_ms": null,
+    "wal_rate_ops_per_sec": 147117.0,
+    "bottleneck": "Insufficient data to identify bottleneck"
+  },
+  "results": [
+    {
+      "name": "fernet_encrypt_throughput [4KB]",
+      "category": "Crypto",
+      "value": 38.55971427061092,
+      "unit": "MB/s",
+      "samples": [
+        38.55971427061092
+      ],
+      "mean": 38.55971427061092,
+      "stdev": 0.0,
+      "min_val": 38.55971427061092,
+      "max_val": 38.55971427061092,
+      "metadata": {
+        "chunk_size": "4KB"
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "fernet_encrypt_throughput [64KB]",
+      "category": "Crypto",
+      "value": 229.0015104084245,
+      "unit": "MB/s",
+      "samples": [
+        229.0015104084245
+      ],
+      "mean": 229.0015104084245,
+      "stdev": 0.0,
+      "min_val": 229.0015104084245,
+      "max_val": 229.0015104084245,
+      "metadata": {
+        "chunk_size": "64KB"
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "fernet_encrypt_throughput [512KB]",
+      "category": "Crypto",
+      "value": 255.59509334618122,
+      "unit": "MB/s",
+      "samples": [
+        255.59509334618122
+      ],
+      "mean": 255.59509334618122,
+      "stdev": 0.0,
+      "min_val": 255.59509334618122,
+      "max_val": 255.59509334618122,
+      "metadata": {
+        "chunk_size": "512KB"
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "fernet_encrypt_throughput [4MB]",
+      "category": "Crypto",
+      "value": 221.0454865152992,
+      "unit": "MB/s",
+      "samples": [
+        221.0454865152992
+      ],
+      "mean": 221.0454865152992,
+      "stdev": 0.0,
+      "min_val": 221.0454865152992,
+      "max_val": 221.0454865152992,
+      "metadata": {
+        "chunk_size": "4MB"
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "fernet_decrypt_throughput [4KB]",
+      "category": "Crypto",
+      "value": 80.8612623294125,
+      "unit": "MB/s",
+      "samples": [
+        80.8612623294125
+      ],
+      "mean": 80.8612623294125,
+      "stdev": 0.0,
+      "min_val": 80.8612623294125,
+      "max_val": 80.8612623294125,
+      "metadata": {
+        "chunk_size": "4KB"
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "fernet_decrypt_throughput [64KB]",
+      "category": "Crypto",
+      "value": 311.1665593453846,
+      "unit": "MB/s",
+      "samples": [
+        311.1665593453846
+      ],
+      "mean": 311.1665593453846,
+      "stdev": 0.0,
+      "min_val": 311.1665593453846,
+      "max_val": 311.1665593453846,
+      "metadata": {
+        "chunk_size": "64KB"
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "fernet_decrypt_throughput [512KB]",
+      "category": "Crypto",
+      "value": 370.84698262091604,
+      "unit": "MB/s",
+      "samples": [
+        370.84698262091604
+      ],
+      "mean": 370.84698262091604,
+      "stdev": 0.0,
+      "min_val": 370.84698262091604,
+      "max_val": 370.84698262091604,
+      "metadata": {
+        "chunk_size": "512KB"
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "fernet_decrypt_throughput [4MB]",
+      "category": "Crypto",
+      "value": 401.3487753956656,
+      "unit": "MB/s",
+      "samples": [
+        401.3487753956656
+      ],
+      "mean": 401.3487753956656,
+      "stdev": 0.0,
+      "min_val": 401.3487753956656,
+      "max_val": 401.3487753956656,
+      "metadata": {
+        "chunk_size": "4MB"
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "fernet_roundtrip_mbps [64KB]",
+      "category": "Crypto",
+      "value": 187.7018103070624,
+      "unit": "MB/s",
+      "samples": [
+        187.7018103070624
+      ],
+      "mean": 187.7018103070624,
+      "stdev": 0.0,
+      "min_val": 187.7018103070624,
+      "max_val": 187.7018103070624,
+      "metadata": {
+        "chunk_size": "64KB"
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "fernet_roundtrip_mbps [512KB]",
+      "category": "Crypto",
+      "value": 213.58429833642174,
+      "unit": "MB/s",
+      "samples": [
+        213.58429833642174
+      ],
+      "mean": 213.58429833642174,
+      "stdev": 0.0,
+      "min_val": 213.58429833642174,
+      "max_val": 213.58429833642174,
+      "metadata": {
+        "chunk_size": "512KB"
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "fernet_roundtrip_mbps [4MB]",
+      "category": "Crypto",
+      "value": 171.5885413478124,
+      "unit": "MB/s",
+      "samples": [
+        171.5885413478124
+      ],
+      "mean": 171.5885413478124,
+      "stdev": 0.0,
+      "min_val": 171.5885413478124,
+      "max_val": 171.5885413478124,
+      "metadata": {
+        "chunk_size": "4MB"
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "parallel_encrypt_speedup [threads=1]",
+      "category": "Crypto",
+      "value": 323.8896303180196,
+      "unit": "MB/s",
+      "samples": [
+        323.8896303180196
+      ],
+      "mean": 323.8896303180196,
+      "stdev": 0.0,
+      "min_val": 323.8896303180196,
+      "max_val": 323.8896303180196,
+      "metadata": {
+        "threads": 1,
+        "chunks": 12,
+        "chunk_size": "512KB"
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "parallel_encrypt_speedup [threads=2]",
+      "category": "Crypto",
+      "value": 453.06821115168293,
+      "unit": "MB/s",
+      "samples": [
+        453.06821115168293
+      ],
+      "mean": 453.06821115168293,
+      "stdev": 0.0,
+      "min_val": 453.06821115168293,
+      "max_val": 453.06821115168293,
+      "metadata": {
+        "threads": 2,
+        "chunks": 12,
+        "chunk_size": "512KB"
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "parallel_encrypt_speedup [threads=4]",
+      "category": "Crypto",
+      "value": 378.5580915990636,
+      "unit": "MB/s",
+      "samples": [
+        378.5580915990636
+      ],
+      "mean": 378.5580915990636,
+      "stdev": 0.0,
+      "min_val": 378.5580915990636,
+      "max_val": 378.5580915990636,
+      "metadata": {
+        "threads": 4,
+        "chunks": 12,
+        "chunk_size": "512KB"
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "parallel_encrypt_speedup [threads=8]",
+      "category": "Crypto",
+      "value": 329.0629916277795,
+      "unit": "MB/s",
+      "samples": [
+        329.0629916277795
+      ],
+      "mean": 329.0629916277795,
+      "stdev": 0.0,
+      "min_val": 329.0629916277795,
+      "max_val": 329.0629916277795,
+      "metadata": {
+        "threads": 8,
+        "chunks": 12,
+        "chunk_size": "512KB"
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "parallel_encrypt_speedup [threads=12]",
+      "category": "Crypto",
+      "value": 341.8731555366683,
+      "unit": "MB/s",
+      "samples": [
+        341.8731555366683
+      ],
+      "mean": 341.8731555366683,
+      "stdev": 0.0,
+      "min_val": 341.8731555366683,
+      "max_val": 341.8731555366683,
+      "metadata": {
+        "threads": 12,
+        "chunks": 12,
+        "chunk_size": "512KB"
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "key_generation_ops_per_sec",
+      "category": "Crypto",
+      "value": 2035293.198657028,
+      "unit": "ops/s",
+      "samples": [
+        2035293.198657028
+      ],
+      "mean": 2035293.198657028,
+      "stdev": 0.0,
+      "min_val": 2035293.198657028,
+      "max_val": 2035293.198657028,
+      "metadata": {
+        "n_keys_per_run": 200
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "encryption_overhead_bytes [4KB]",
+      "category": "Crypto",
+      "value": 1464.0,
+      "unit": "bytes",
+      "samples": [
+        1464.0
+      ],
+      "mean": 1464.0,
+      "stdev": 0.0,
+      "min_val": 1464.0,
+      "max_val": 1464.0,
+      "metadata": {
+        "plaintext_bytes": 4096,
+        "ciphertext_bytes": 5560,
+        "overhead_pct": 35.74
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "encryption_overhead_bytes [64KB]",
+      "category": "Crypto",
+      "value": 21944.0,
+      "unit": "bytes",
+      "samples": [
+        21944.0
+      ],
+      "mean": 21944.0,
+      "stdev": 0.0,
+      "min_val": 21944.0,
+      "max_val": 21944.0,
+      "metadata": {
+        "plaintext_bytes": 65536,
+        "ciphertext_bytes": 87480,
+        "overhead_pct": 33.48
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "encryption_overhead_bytes [512KB]",
+      "category": "Crypto",
+      "value": 174860.0,
+      "unit": "bytes",
+      "samples": [
+        174860.0
+      ],
+      "mean": 174860.0,
+      "stdev": 0.0,
+      "min_val": 174860.0,
+      "max_val": 174860.0,
+      "metadata": {
+        "plaintext_bytes": 524288,
+        "ciphertext_bytes": 699148,
+        "overhead_pct": 33.35
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "fernet_vs_aesgcm [fernet_encrypt, 1MB]",
+      "category": "Crypto",
+      "value": 428.84809685350905,
+      "unit": "MB/s",
+      "samples": [
+        428.84809685350905
+      ],
+      "mean": 428.84809685350905,
+      "stdev": 0.0,
+      "min_val": 428.84809685350905,
+      "max_val": 428.84809685350905,
+      "metadata": {
+        "algorithm": "Fernet",
+        "op": "encrypt"
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "fernet_vs_aesgcm [aesgcm_encrypt, 1MB]",
+      "category": "Crypto",
+      "value": 3890.3530701188265,
+      "unit": "MB/s",
+      "samples": [
+        3890.3530701188265
+      ],
+      "mean": 3890.3530701188265,
+      "stdev": 0.0,
+      "min_val": 3890.3530701188265,
+      "max_val": 3890.3530701188265,
+      "metadata": {
+        "algorithm": "AES-256-GCM",
+        "op": "encrypt"
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "fernet_vs_aesgcm [fernet_decrypt, 1MB]",
+      "category": "Crypto",
+      "value": 426.56382602955983,
+      "unit": "MB/s",
+      "samples": [
+        426.56382602955983
+      ],
+      "mean": 426.56382602955983,
+      "stdev": 0.0,
+      "min_val": 426.56382602955983,
+      "max_val": 426.56382602955983,
+      "metadata": {
+        "algorithm": "Fernet",
+        "op": "decrypt"
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "fernet_vs_aesgcm [aesgcm_decrypt, 1MB]",
+      "category": "Crypto",
+      "value": 4146.607885759358,
+      "unit": "MB/s",
+      "samples": [
+        4146.607885759358
+      ],
+      "mean": 4146.607885759358,
+      "stdev": 0.0,
+      "min_val": 4146.607885759358,
+      "max_val": 4146.607885759358,
+      "metadata": {
+        "algorithm": "AES-256-GCM",
+        "op": "decrypt"
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "encrypt_12_shards_total_time [4MB]",
+      "category": "Crypto",
+      "value": 13.886639033444226,
+      "unit": "ms",
+      "samples": [
+        13.886639033444226
+      ],
+      "mean": 13.886639033444226,
+      "stdev": 0.0,
+      "min_val": 13.886639033444226,
+      "max_val": 13.886639033444226,
+      "metadata": {
+        "n_shards": 12,
+        "shard_size_kb": 512,
+        "file_size": "4MB"
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "parallel_12_shards [sequential]",
+      "category": "Crypto",
+      "value": 13.991764979436994,
+      "unit": "ms",
+      "samples": [
+        13.991764979436994
+      ],
+      "mean": 13.991764979436994,
+      "stdev": 0.0,
+      "min_val": 13.991764979436994,
+      "max_val": 13.991764979436994,
+      "metadata": {
+        "mode": "sequential",
+        "shards": 12
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "parallel_12_shards [4 threads]",
+      "category": "Crypto",
+      "value": 15.23338002152741,
+      "unit": "ms",
+      "samples": [
+        15.23338002152741
+      ],
+      "mean": 15.23338002152741,
+      "stdev": 0.0,
+      "min_val": 15.23338002152741,
+      "max_val": 15.23338002152741,
+      "metadata": {
+        "mode": "parallel",
+        "shards": 12,
+        "speedup": 0.92
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "hmac_verification_overhead [valid_token, 512KB]",
+      "category": "Crypto",
+      "value": 1.179079059511423,
+      "unit": "ms",
+      "samples": [
+        1.179079059511423
+      ],
+      "mean": 1.179079059511423,
+      "stdev": 0.0,
+      "min_val": 1.179079059511423,
+      "max_val": 1.179079059511423,
+      "metadata": {
+        "token": "valid",
+        "size": "512KB"
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "hmac_verification_overhead [tampered_token, 512KB]",
+      "category": "Crypto",
+      "value": 0.8366620168089867,
+      "unit": "ms",
+      "samples": [
+        0.8366620168089867
+      ],
+      "mean": 0.8366620168089867,
+      "stdev": 0.0,
+      "min_val": 0.8366620168089867,
+      "max_val": 0.8366620168089867,
+      "metadata": {
+        "token": "tampered",
+        "overhead_vs_valid_ms": -0.342,
+        "size": "512KB"
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "wal_append_ops_per_sec [fsync]",
+      "category": "Journal",
+      "value": 844.92023291278,
+      "unit": "ops/s",
+      "samples": [
+        844.92023291278
+      ],
+      "mean": 844.92023291278,
+      "stdev": 0.0,
+      "min_val": 844.92023291278,
+      "max_val": 844.92023291278,
+      "metadata": {
+        "n_ops": 50,
+        "durable": true
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "wal_append_buffered_ops_per_sec [no fsync]",
+      "category": "Journal",
+      "value": 147117.1732297182,
+      "unit": "ops/s",
+      "samples": [
+        147117.1732297182
+      ],
+      "mean": 147117.1732297182,
+      "stdev": 0.0,
+      "min_val": 147117.1732297182,
+      "max_val": 147117.1732297182,
+      "metadata": {
+        "n_ops": 1000,
+        "durable": false
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "wal_vs_direct_json [wal_fsync]",
+      "category": "Journal",
+      "value": 831.6186602668524,
+      "unit": "ops/s",
+      "samples": [
+        831.6186602668524
+      ],
+      "mean": 831.6186602668524,
+      "stdev": 0.0,
+      "min_val": 831.6186602668524,
+      "max_val": 831.6186602668524,
+      "metadata": {
+        "mode": "WAL_fsync",
+        "n_ops": 50
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "wal_vs_direct_json [direct_atomic]",
+      "category": "Journal",
+      "value": 17127.158640567788,
+      "unit": "ops/s",
+      "samples": [
+        17127.158640567788
+      ],
+      "mean": 17127.158640567788,
+      "stdev": 0.0,
+      "min_val": 17127.158640567788,
+      "max_val": 17127.158640567788,
+      "metadata": {
+        "mode": "direct_rename",
+        "n_ops": 50
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "wal_replay_speed",
+      "category": "Journal",
+      "value": 720384.8571769538,
+      "unit": "entries/s",
+      "samples": [
+        720384.8571769538
+      ],
+      "mean": 720384.8571769538,
+      "stdev": 0.0,
+      "min_val": 720384.8571769538,
+      "max_val": 720384.8571769538,
+      "metadata": {
+        "n_entries": 1000
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "journal_checkpoint_time [1000 entries]",
+      "category": "Journal",
+      "value": 19.36649309936911,
+      "unit": "ms",
+      "samples": [
+        19.36649309936911
+      ],
+      "mean": 19.36649309936911,
+      "stdev": 0.0,
+      "min_val": 19.36649309936911,
+      "max_val": 19.36649309936911,
+      "metadata": {
+        "n_entries": 1000,
+        "includes_deletes": true
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "metadata_write_latency_p50_p99",
+      "category": "Journal",
+      "value": 6.746035069227219,
+      "unit": "\u00b5s",
+      "samples": [
+        6.403075531125069,
+        6.4140185713768005,
+        6.439979188144207,
+        6.460933946073055,
+        6.46605622023344,
+        6.483984179794788,
+        6.485031917691231,
+        6.485031917691231,
+        6.488990038633347,
+        6.499001756310463,
+        6.509013473987579,
+        6.511108949780464,
+        6.514950655400753,
+        6.51506707072258,
+        6.523914635181427,
+        6.526010110974312,
+        6.529968231916428,
+        6.5319472923874855,
+        6.549060344696045,
+        6.554997526109219,
+        6.561051122844219,
+        6.561982445418835,
+        6.565009243786335,
+        6.566988304257393,
+        6.577000021934509,
+        6.578047759830952,
+        6.578979082405567,
+        6.58002682030201,
+        6.587011739611626,
+        6.587943062186241,
+        6.588059477508068,
+        6.588059477508068,
+        6.593065336346626,
+        6.600050255656242,
+        6.6020293161273,
+        6.602960638701916,
+        6.605056114494801,
+        6.6069187596440315,
+        6.609014235436916,
+        6.615067832171917,
+        6.618094630539417,
+        6.618909537792206,
+        6.620073691010475,
+        6.626010872423649,
+        6.629037670791149,
+        6.632995791733265,
+        6.638001650571823,
+        6.642076186835766,
+        6.643007509410381,
+        6.644055247306824,
+        6.644986569881439,
+        6.644986569881439,
+        6.646965630352497,
+        6.647082045674324,
+        6.6480133682489395,
+        6.650923751294613,
+        6.651971489191055,
+        6.653950549662113,
+        6.66396226733923,
+        6.666057743132114,
+        6.668036803603172,
+        6.671063601970673,
+        6.673973985016346,
+        6.675953045487404,
+        6.677000783383846,
+        6.677000783383846,
+        6.678048521280289,
+        6.678979843854904,
+        6.680958904325962,
+        6.6820066422224045,
+        6.684917025268078,
+        6.685033440589905,
+        6.694928742945194,
+        6.702030077576637,
+        6.704009138047695,
+        6.7070359364151955,
+        6.710994057357311,
+        6.712973117828369,
+        6.7140208557248116,
+        6.716931238770485,
+        6.718910299241543,
+        6.71902671456337,
+        6.71902671456337,
+        6.719958037137985,
+        6.721005775034428,
+        6.723916158080101,
+        6.724032573401928,
+        6.724963895976543,
+        6.726011633872986,
+        6.727990694344044,
+        6.729038432240486,
+        6.729038432240486,
+        6.729969754815102,
+        6.732996553182602,
+        6.73497561365366,
+        6.73800241202116,
+        6.73800241202116,
+        6.738933734595776,
+        6.739981472492218,
+        6.746035069227219,
+        6.746035069227219,
+        6.747082807123661,
+        6.748945452272892,
+        6.748945452272892,
+        6.752088665962219,
+        6.753019988536835,
+        6.758957169950008,
+        6.763031706213951,
+        6.763031706213951,
+        6.763031706213951,
+        6.763963028788567,
+        6.768037565052509,
+        6.770016625523567,
+        6.770947948098183,
+        6.772927008569241,
+        6.777001544833183,
+        6.777001544833183,
+        6.780959665775299,
+        6.780959665775299,
+        6.7820074036717415,
+        6.783986464142799,
+        6.793998181819916,
+        6.795045919716358,
+        6.796908564865589,
+        6.804941222071648,
+        6.80598895996809,
+        6.8069202825427055,
+        6.80901575833559,
+        6.80901575833559,
+        6.809947080910206,
+        6.810063496232033,
+        6.812042556703091,
+        6.812973879277706,
+        6.8160006776452065,
+        6.8160006776452065,
+        6.8160006776452065,
+        6.8160006776452065,
+        6.816932000219822,
+        6.817979738116264,
+        6.821006536483765,
+        6.826012395322323,
+        6.829039193689823,
+        6.8320659920573235,
+        6.836024112999439,
+        6.836024112999439,
+        6.843009032309055,
+        6.843009032309055,
+        6.843009032309055,
+        6.843009032309055,
+        6.843940354883671,
+        6.844056770205498,
+        6.847083568572998,
+        6.8480148911476135,
+        6.851041689515114,
+        6.858957931399345,
+        6.860005669295788,
+        6.869086064398289,
+        6.870017386972904,
+        6.8730441853404045,
+        6.87700230628252,
+        6.878981366753578,
+        6.878981366753578,
+        6.885034963488579,
+        6.900983862578869,
+        6.9069210439920425,
+        6.909016519784927,
+        6.909016519784927,
+        6.91006425768137,
+        6.915070116519928,
+        6.9160014390945435,
+        6.916932761669159,
+        6.917980499565601,
+        6.919028237462044,
+        6.92601315677166,
+        6.927060894668102,
+        6.943941116333008,
+        6.946036592125893,
+        6.965012289583683,
+        6.9730449467897415,
+        7.002963684499264,
+        7.0160022005438805,
+        7.0319510996341705,
+        7.034046575427055,
+        7.041962817311287,
+        7.0659443736076355,
+        7.071997970342636,
+        7.1160029619932175,
+        7.178052328526974,
+        7.251976057887077,
+        7.646973244845867,
+        7.756985723972321,
+        7.770024240016937,
+        7.800990715622902,
+        7.860944606363773,
+        8.014962077140808,
+        8.19494016468525,
+        8.373986929655075,
+        9.273062460124493,
+        11.230004020035267,
+        11.743046343326569
+      ],
+      "mean": 6.846047472208738,
+      "stdev": 0.5724758492686033,
+      "min_val": 6.403075531125069,
+      "max_val": 11.743046343326569,
+      "metadata": {
+        "p50_us": 6.746,
+        "p99_us": 11.23,
+        "mean_us": 6.846,
+        "n_ops": 200
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "concurrent_metadata_writes [4 threads]",
+      "category": "Journal",
+      "value": 26568.92483395204,
+      "unit": "ops/s",
+      "samples": [
+        26568.92483395204
+      ],
+      "mean": 26568.92483395204,
+      "stdev": 0.0,
+      "min_val": 26568.92483395204,
+      "max_val": 26568.92483395204,
+      "metadata": {
+        "threads": 4,
+        "ops_per_thread": 100
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "crash_recovery_simulation [100 entries, truncate last 10]",
+      "category": "Journal",
+      "value": 0.13927393592894077,
+      "unit": "ms",
+      "samples": [
+        0.13927393592894077
+      ],
+      "mean": 0.13927393592894077,
+      "stdev": 0.0,
+      "min_val": 0.13927393592894077,
+      "max_val": 0.13927393592894077,
+      "metadata": {
+        "good_entries": 100,
+        "corrupt_appended": 10,
+        "recovered": 100
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "journal_file_size_growth",
+      "category": "Journal",
+      "value": 139.7708,
+      "unit": "bytes/entry",
+      "samples": [
+        139.9,
+        139.72,
+        139.76,
+        139.728,
+        139.746
+      ],
+      "mean": 139.7708,
+      "stdev": 0.0738863992897214,
+      "min_val": 139.72,
+      "max_val": 139.9,
+      "metadata": {
+        "sample_counts": [
+          10,
+          50,
+          100,
+          500,
+          1000
+        ]
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "tree_scan_latency [100 files]",
+      "category": "Journal",
+      "value": 0.7057869806885719,
+      "unit": "ms",
+      "samples": [
+        0.7057869806885719
+      ],
+      "mean": 0.7057869806885719,
+      "stdev": 0.0,
+      "min_val": 0.7057869806885719,
+      "max_val": 0.7057869806885719,
+      "metadata": {
+        "n_files": 100,
+        "includes_parse": true
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "tree_scan_latency [1000 files]",
+      "category": "Journal",
+      "value": 7.032571942545474,
+      "unit": "ms",
+      "samples": [
+        7.032571942545474
+      ],
+      "mean": 7.032571942545474,
+      "stdev": 0.0,
+      "min_val": 7.032571942545474,
+      "max_val": 7.032571942545474,
+      "metadata": {
+        "n_files": 1000,
+        "includes_parse": true
+      },
+      "skipped": false,
+      "skip_reason": ""
+    }
+  ]
+}

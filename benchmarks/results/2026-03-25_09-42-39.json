@@ -1,0 +1,3672 @@
+{
+  "suite": "CollectiveFS Benchmark Suite",
+  "wall_time_seconds": 341.52,
+  "system": {
+    "python_version": "3.12.3 (main, Mar  3 2026, 12:15:18) [GCC 13.3.0]",
+    "os": "Linux-6.11.0-29-generic-x86_64-with-glibc2.39",
+    "cpu_count_logical": 24,
+    "cpu_count_physical": 16,
+    "ram_total_gb": 62.54,
+    "ram_available_gb": 20.35,
+    "hostname": "office",
+    "machine": "x86_64",
+    "encoder_path": "/home/andy/code/CollectiveFS/lib/encoder",
+    "decoder_path": "/home/andy/code/CollectiveFS/lib/decoder"
+  },
+  "config": {
+    "suites": [
+      "io",
+      "sharding",
+      "crypto",
+      "recovery",
+      "journal",
+      "cluster"
+    ],
+    "iterations": 5,
+    "sizes": [
+      "64KB",
+      "256KB",
+      "1MB",
+      "4MB",
+      "16MB",
+      "64MB"
+    ]
+  },
+  "performance_summary": {
+    "best_read_mbps": 21372.89,
+    "best_write_mbps": 4961.77,
+    "best_encode_mbps": 1043.84,
+    "best_pipeline_mbps": 182.14,
+    "sharding_parallel_speedup": 4.3,
+    "enc_overhead_vs_raw_pct": 2516.6,
+    "recovery_4_missing_ms": 6.65,
+    "wal_rate_ops_per_sec": 148162.0,
+    "bottleneck": "Reed-Solomon encoding (encode throughput << raw write)"
+  },
+  "results": [
+    {
+      "name": "raw_disk_write [64KB]",
+      "category": "I/O Pipeline",
+      "value": 2384.4231827233316,
+      "unit": "MB/s",
+      "samples": [
+        1953.309097259616,
+        2409.8703294730226,
+        2740.8713267577446,
+        2246.265415930981,
+        2571.799744195293
+      ],
+      "mean": 2384.4231827233316,
+      "stdev": 303.2159855872539,
+      "min_val": 1953.309097259616,
+      "max_val": 2740.8713267577446,
+      "metadata": {
+        "file_size": "64KB"
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "raw_disk_read [64KB]",
+      "category": "I/O Pipeline",
+      "value": 12414.283814374012,
+      "unit": "MB/s",
+      "samples": [
+        11182.713907808953,
+        12908.033083285247,
+        13216.259957658413,
+        13409.034217493381,
+        11355.377905624062
+      ],
+      "mean": 12414.283814374012,
+      "stdev": 1062.3710036748078,
+      "min_val": 11182.713907808953,
+      "max_val": 13409.034217493381,
+      "metadata": {
+        "file_size": "64KB"
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "cfs_encode_write [64KB]",
+      "category": "I/O Pipeline",
+      "value": 44.33027207640541,
+      "unit": "MB/s",
+      "samples": [
+        42.532487105675784,
+        43.51788776121368,
+        44.70576177657616,
+        44.971791802075195,
+        45.923431936486224
+      ],
+      "mean": 44.33027207640541,
+      "stdev": 1.3212397104312048,
+      "min_val": 42.532487105675784,
+      "max_val": 45.923431936486224,
+      "metadata": {
+        "file_size": "64KB",
+        "data": 8,
+        "par": 4
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "cfs_encode_encrypt_write [64KB]",
+      "category": "I/O Pipeline",
+      "value": 19.953493668585434,
+      "unit": "MB/s",
+      "samples": [
+        18.206711393372817,
+        23.422187095521107,
+        19.08938969240843,
+        20.13134688782475,
+        18.917833273800067
+      ],
+      "mean": 19.953493668585434,
+      "stdev": 2.057546008576077,
+      "min_val": 18.206711393372817,
+      "max_val": 23.422187095521107,
+      "metadata": {
+        "file_size": "64KB",
+        "data": 8,
+        "par": 4
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "cfs_full_write_pipeline [64KB]",
+      "category": "I/O Pipeline",
+      "value": 21.058869795933507,
+      "unit": "MB/s",
+      "samples": [
+        23.461674290266657,
+        19.511299667970118,
+        18.302864418814046,
+        24.405978929620964,
+        19.612531672995754
+      ],
+      "mean": 21.058869795933507,
+      "stdev": 2.6953219611180357,
+      "min_val": 18.302864418814046,
+      "max_val": 24.405978929620964,
+      "metadata": {
+        "file_size": "64KB",
+        "data": 8,
+        "par": 4
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "cfs_decode_read [64KB]",
+      "category": "I/O Pipeline",
+      "value": 23.14190723119042,
+      "unit": "MB/s",
+      "samples": [
+        18.788504899571944,
+        19.852822744365657,
+        29.29078321490992,
+        20.34926491546619,
+        27.428160381638392
+      ],
+      "mean": 23.14190723119042,
+      "stdev": 4.841220963219756,
+      "min_val": 18.788504899571944,
+      "max_val": 29.29078321490992,
+      "metadata": {
+        "file_size": "64KB",
+        "data": 8,
+        "par": 4
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "cfs_full_roundtrip [64KB]",
+      "category": "I/O Pipeline",
+      "value": 11.319825526537246,
+      "unit": "MB/s",
+      "samples": [
+        11.665573243300678,
+        9.117347468608532,
+        9.519370770430463,
+        11.509641524594535,
+        14.787194625752019
+      ],
+      "mean": 11.319825526537246,
+      "stdev": 2.251153426101831,
+      "min_val": 9.117347468608532,
+      "max_val": 14.787194625752019,
+      "metadata": {
+        "file_size": "64KB",
+        "verified": "sha256"
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "pipeline_overhead_pct [64KB]",
+      "category": "I/O Pipeline",
+      "value": 10506.680361714578,
+      "unit": "%",
+      "samples": [
+        9507.797673653176,
+        10174.999314210472,
+        8768.641129073023,
+        10928.165267378638,
+        13153.798424257582
+      ],
+      "mean": 10506.680361714578,
+      "stdev": 1681.773088047813,
+      "min_val": 8768.641129073023,
+      "max_val": 13153.798424257582,
+      "metadata": {
+        "file_size": "64KB",
+        "raw_mean_ms": 0.03,
+        "pipe_mean_ms": 2.81
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "raw_disk_write [256KB]",
+      "category": "I/O Pipeline",
+      "value": 2755.134306979254,
+      "unit": "MB/s",
+      "samples": [
+        2259.1940144315995,
+        2233.479301547483,
+        2083.7318713946797,
+        3187.392890167319,
+        4011.8734573551883
+      ],
+      "mean": 2755.134306979254,
+      "stdev": 826.9072988855146,
+      "min_val": 2083.7318713946797,
+      "max_val": 4011.8734573551883,
+      "metadata": {
+        "file_size": "256KB"
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "raw_disk_read [256KB]",
+      "category": "I/O Pipeline",
+      "value": 21372.89138022265,
+      "unit": "MB/s",
+      "samples": [
+        16839.575051362077,
+        20203.62443081323,
+        22259.944730650026,
+        23094.698642806445,
+        24466.614045481474
+      ],
+      "mean": 21372.89138022265,
+      "stdev": 2968.1958308887747,
+      "min_val": 16839.575051362077,
+      "max_val": 24466.614045481474,
+      "metadata": {
+        "file_size": "256KB"
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "cfs_encode_write [256KB]",
+      "category": "I/O Pipeline",
+      "value": 161.76312121268305,
+      "unit": "MB/s",
+      "samples": [
+        160.5611697106729,
+        173.62267442885184,
+        151.07483780348247,
+        165.69196213877044,
+        157.86496198163755
+      ],
+      "mean": 161.76312121268305,
+      "stdev": 8.470013703483612,
+      "min_val": 151.07483780348247,
+      "max_val": 173.62267442885184,
+      "metadata": {
+        "file_size": "256KB",
+        "data": 8,
+        "par": 4
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "cfs_encode_encrypt_write [256KB]",
+      "category": "I/O Pipeline",
+      "value": 55.42612143189367,
+      "unit": "MB/s",
+      "samples": [
+        53.11225067194619,
+        53.03527310879283,
+        54.55449263033688,
+        57.2309870084537,
+        59.19760373993874
+      ],
+      "mean": 55.42612143189367,
+      "stdev": 2.7070052140172223,
+      "min_val": 53.03527310879283,
+      "max_val": 59.19760373993874,
+      "metadata": {
+        "file_size": "256KB",
+        "data": 8,
+        "par": 4
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "cfs_full_write_pipeline [256KB]",
+      "category": "I/O Pipeline",
+      "value": 65.50416198904642,
+      "unit": "MB/s",
+      "samples": [
+        66.26541501890298,
+        61.47254789721208,
+        73.51295671020938,
+        71.2257194897208,
+        55.04417082918683
+      ],
+      "mean": 65.50416198904642,
+      "stdev": 7.4686318449990345,
+      "min_val": 55.04417082918683,
+      "max_val": 73.51295671020938,
+      "metadata": {
+        "file_size": "256KB",
+        "data": 8,
+        "par": 4
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "cfs_decode_read [256KB]",
+      "category": "I/O Pipeline",
+      "value": 54.84588538289873,
+      "unit": "MB/s",
+      "samples": [
+        48.63009062702497,
+        71.69042426966514,
+        50.66995745083272,
+        52.05316448927652,
+        51.18579007769431
+      ],
+      "mean": 54.84588538289873,
+      "stdev": 9.50011258461704,
+      "min_val": 48.63009062702497,
+      "max_val": 71.69042426966514,
+      "metadata": {
+        "file_size": "256KB",
+        "data": 8,
+        "par": 4
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "cfs_full_roundtrip [256KB]",
+      "category": "I/O Pipeline",
+      "value": 28.702612333530066,
+      "unit": "MB/s",
+      "samples": [
+        29.70710560089791,
+        32.30253805267957,
+        26.209986663134384,
+        29.10404553921303,
+        26.189385811725433
+      ],
+      "mean": 28.702612333530066,
+      "stdev": 2.581623075161441,
+      "min_val": 26.189385811725433,
+      "max_val": 32.30253805267957,
+      "metadata": {
+        "file_size": "256KB",
+        "verified": "sha256"
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "pipeline_overhead_pct [256KB]",
+      "category": "I/O Pipeline",
+      "value": 6927.105534021274,
+      "unit": "%",
+      "samples": [
+        5112.734007352941,
+        8146.722833978083,
+        6956.875196576577,
+        6629.419106430535,
+        7789.776525768237
+      ],
+      "mean": 6927.105534021274,
+      "stdev": 1184.600679250269,
+      "min_val": 5112.734007352941,
+      "max_val": 8146.722833978083,
+      "metadata": {
+        "file_size": "256KB",
+        "raw_mean_ms": 0.06,
+        "pipe_mean_ms": 4.01
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "raw_disk_write [1MB]",
+      "category": "I/O Pipeline",
+      "value": 4961.767431709206,
+      "unit": "MB/s",
+      "samples": [
+        4277.525685019334,
+        4964.677462273366,
+        5215.478365618139,
+        5137.769588119999,
+        5213.386057515193
+      ],
+      "mean": 4961.767431709206,
+      "stdev": 395.87029633763166,
+      "min_val": 4277.525685019334,
+      "max_val": 5215.478365618139,
+      "metadata": {
+        "file_size": "1MB"
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "raw_disk_read [1MB]",
+      "category": "I/O Pipeline",
+      "value": 17781.42718243194,
+      "unit": "MB/s",
+      "samples": [
+        16702.31654922457,
+        16865.959937640633,
+        16382.156457460422,
+        19062.141260640707,
+        19894.561707193363
+      ],
+      "mean": 17781.42718243194,
+      "stdev": 1586.3546787060363,
+      "min_val": 16382.156457460422,
+      "max_val": 19894.561707193363,
+      "metadata": {
+        "file_size": "1MB"
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "cfs_encode_write [1MB]",
+      "category": "I/O Pipeline",
+      "value": 408.24605640702936,
+      "unit": "MB/s",
+      "samples": [
+        406.0648200677155,
+        403.2837117820633,
+        389.2892431583934,
+        402.7246613348141,
+        439.86784569216064
+      ],
+      "mean": 408.24605640702936,
+      "stdev": 18.83591506819658,
+      "min_val": 389.2892431583934,
+      "max_val": 439.86784569216064,
+      "metadata": {
+        "file_size": "1MB",
+        "data": 8,
+        "par": 4
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "cfs_encode_encrypt_write [1MB]",
+      "category": "I/O Pipeline",
+      "value": 112.74940297329124,
+      "unit": "MB/s",
+      "samples": [
+        130.20909651312695,
+        120.78948881020997,
+        101.64229513173835,
+        98.95207790405509,
+        112.15405650732583
+      ],
+      "mean": 112.74940297329124,
+      "stdev": 13.07260819284543,
+      "min_val": 98.95207790405509,
+      "max_val": 130.20909651312695,
+      "metadata": {
+        "file_size": "1MB",
+        "data": 8,
+        "par": 4
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "cfs_full_write_pipeline [1MB]",
+      "category": "I/O Pipeline",
+      "value": 122.1568659833634,
+      "unit": "MB/s",
+      "samples": [
+        127.77743577591653,
+        102.31021551102329,
+        135.40165681503086,
+        129.46723528586884,
+        115.82778652897753
+      ],
+      "mean": 122.1568659833634,
+      "stdev": 13.175769142803054,
+      "min_val": 102.31021551102329,
+      "max_val": 135.40165681503086,
+      "metadata": {
+        "file_size": "1MB",
+        "data": 8,
+        "par": 4
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "cfs_decode_read [1MB]",
+      "category": "I/O Pipeline",
+      "value": 113.7789582616783,
+      "unit": "MB/s",
+      "samples": [
+        118.97590841394751,
+        124.68111317132455,
+        125.25174066614807,
+        103.16408324340836,
+        96.82194581356302
+      ],
+      "mean": 113.7789582616783,
+      "stdev": 13.016392083431125,
+      "min_val": 96.82194581356302,
+      "max_val": 125.25174066614807,
+      "metadata": {
+        "file_size": "1MB",
+        "data": 8,
+        "par": 4
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "cfs_full_roundtrip [1MB]",
+      "category": "I/O Pipeline",
+      "value": 61.401202586266116,
+      "unit": "MB/s",
+      "samples": [
+        63.511705865837946,
+        58.53842353721043,
+        64.92450391953878,
+        58.41276056123163,
+        61.618619047511785
+      ],
+      "mean": 61.401202586266116,
+      "stdev": 2.9172519567415405,
+      "min_val": 58.41276056123163,
+      "max_val": 64.92450391953878,
+      "metadata": {
+        "file_size": "1MB",
+        "verified": "sha256"
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "pipeline_overhead_pct [1MB]",
+      "category": "I/O Pipeline",
+      "value": 4428.26738022867,
+      "unit": "%",
+      "samples": [
+        4222.74284807106,
+        4438.460986984498,
+        4898.82958108236,
+        3646.89300776636,
+        4934.410477239071
+      ],
+      "mean": 4428.26738022867,
+      "stdev": 531.6248142256235,
+      "min_val": 3646.89300776636,
+      "max_val": 4934.410477239071,
+      "metadata": {
+        "file_size": "1MB",
+        "raw_mean_ms": 0.21,
+        "pipe_mean_ms": 9.5
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "raw_disk_write [4MB]",
+      "category": "I/O Pipeline",
+      "value": 4138.011028609404,
+      "unit": "MB/s",
+      "samples": [
+        3936.28331924234,
+        3751.799574632663,
+        4397.672744102133,
+        4356.021842649303,
+        4248.277662420583
+      ],
+      "mean": 4138.011028609404,
+      "stdev": 281.4982273355935,
+      "min_val": 3751.799574632663,
+      "max_val": 4397.672744102133,
+      "metadata": {
+        "file_size": "4MB"
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "raw_disk_read [4MB]",
+      "category": "I/O Pipeline",
+      "value": 19221.76651614217,
+      "unit": "MB/s",
+      "samples": [
+        18300.93895184249,
+        19142.235451288878,
+        18766.74784858025,
+        19207.402602745853,
+        20691.507726253363
+      ],
+      "mean": 19221.76651614217,
+      "stdev": 897.4458379183359,
+      "min_val": 18300.93895184249,
+      "max_val": 20691.507726253363,
+      "metadata": {
+        "file_size": "4MB"
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "cfs_encode_write [4MB]",
+      "category": "I/O Pipeline",
+      "value": 676.6190668285687,
+      "unit": "MB/s",
+      "samples": [
+        621.8810733162645,
+        729.8846552117379,
+        698.8529199542089,
+        699.9092060109215,
+        632.5674796497111
+      ],
+      "mean": 676.6190668285687,
+      "stdev": 46.93289885698694,
+      "min_val": 621.8810733162645,
+      "max_val": 729.8846552117379,
+      "metadata": {
+        "file_size": "4MB",
+        "data": 8,
+        "par": 4
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "cfs_encode_encrypt_write [4MB]",
+      "category": "I/O Pipeline",
+      "value": 164.20830144583354,
+      "unit": "MB/s",
+      "samples": [
+        161.09818698410416,
+        165.01131444518893,
+        169.18429121742443,
+        163.25998174068596,
+        162.48773284176417
+      ],
+      "mean": 164.20830144583354,
+      "stdev": 3.120007317044687,
+      "min_val": 161.09818698410416,
+      "max_val": 169.18429121742443,
+      "metadata": {
+        "file_size": "4MB",
+        "data": 8,
+        "par": 4
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "cfs_full_write_pipeline [4MB]",
+      "category": "I/O Pipeline",
+      "value": 158.14376406713723,
+      "unit": "MB/s",
+      "samples": [
+        175.3475312364664,
+        139.1702255105421,
+        160.5020181110343,
+        144.60710024501032,
+        171.09194523263304
+      ],
+      "mean": 158.14376406713723,
+      "stdev": 15.909295987239874,
+      "min_val": 139.1702255105421,
+      "max_val": 175.3475312364664,
+      "metadata": {
+        "file_size": "4MB",
+        "data": 8,
+        "par": 4
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "cfs_decode_read [4MB]",
+      "category": "I/O Pipeline",
+      "value": 151.37197510559207,
+      "unit": "MB/s",
+      "samples": [
+        166.78121086818717,
+        161.5119322690136,
+        125.05613053222453,
+        154.11340427911506,
+        149.39719757942
+      ],
+      "mean": 151.37197510559207,
+      "stdev": 16.15705831722021,
+      "min_val": 125.05613053222453,
+      "max_val": 166.78121086818717,
+      "metadata": {
+        "file_size": "4MB",
+        "data": 8,
+        "par": 4
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "cfs_full_roundtrip [4MB]",
+      "category": "I/O Pipeline",
+      "value": 79.79120891739633,
+      "unit": "MB/s",
+      "samples": [
+        80.0610514623775,
+        83.44561813121945,
+        74.25751904059626,
+        81.11843830499996,
+        80.07341764778849
+      ],
+      "mean": 79.79120891739633,
+      "stdev": 3.38712359416456,
+      "min_val": 74.25751904059626,
+      "max_val": 83.44561813121945,
+      "metadata": {
+        "file_size": "4MB",
+        "verified": "sha256"
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "pipeline_overhead_pct [4MB]",
+      "category": "I/O Pipeline",
+      "value": 2310.8229855124464,
+      "unit": "%",
+      "samples": [
+        2369.5540614960123,
+        2513.939540109391,
+        2189.026137380216,
+        2290.290681752745,
+        2191.3045068238666
+      ],
+      "mean": 2310.8229855124464,
+      "stdev": 136.24095245022676,
+      "min_val": 2189.026137380216,
+      "max_val": 2513.939540109391,
+      "metadata": {
+        "file_size": "4MB",
+        "raw_mean_ms": 1.01,
+        "pipe_mean_ms": 24.32
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "raw_disk_write [16MB]",
+      "category": "I/O Pipeline",
+      "value": 3207.9792684900194,
+      "unit": "MB/s",
+      "samples": [
+        3180.987839688009,
+        3140.974170867005,
+        3166.954072825198,
+        3251.7383877997745,
+        3299.2418712701106
+      ],
+      "mean": 3207.9792684900194,
+      "stdev": 65.46947801178548,
+      "min_val": 3140.974170867005,
+      "max_val": 3299.2418712701106,
+      "metadata": {
+        "file_size": "16MB"
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "raw_disk_read [16MB]",
+      "category": "I/O Pipeline",
+      "value": 9600.906037773864,
+      "unit": "MB/s",
+      "samples": [
+        7879.790172157297,
+        9029.207809220532,
+        9615.14188402808,
+        9453.398563380622,
+        12026.99176008279
+      ],
+      "mean": 9600.906037773864,
+      "stdev": 1516.322173362224,
+      "min_val": 7879.790172157297,
+      "max_val": 12026.99176008279,
+      "metadata": {
+        "file_size": "16MB"
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "cfs_encode_write [16MB]",
+      "category": "I/O Pipeline",
+      "value": 854.638932080613,
+      "unit": "MB/s",
+      "samples": [
+        865.7508338411249,
+        1004.7994855013144,
+        837.4007051864501,
+        764.0272288169517,
+        801.2164070572243
+      ],
+      "mean": 854.638932080613,
+      "stdev": 92.24054095003133,
+      "min_val": 764.0272288169517,
+      "max_val": 1004.7994855013144,
+      "metadata": {
+        "file_size": "16MB",
+        "data": 8,
+        "par": 4
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "cfs_encode_encrypt_write [16MB]",
+      "category": "I/O Pipeline",
+      "value": 182.02999293944495,
+      "unit": "MB/s",
+      "samples": [
+        179.7409160549061,
+        184.61249959286616,
+        181.42472297749256,
+        183.26911296649862,
+        181.10271310546125
+      ],
+      "mean": 182.02999293944495,
+      "stdev": 1.915126083127103,
+      "min_val": 179.7409160549061,
+      "max_val": 184.61249959286616,
+      "metadata": {
+        "file_size": "16MB",
+        "data": 8,
+        "par": 4
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "cfs_full_write_pipeline [16MB]",
+      "category": "I/O Pipeline",
+      "value": 182.13635736762055,
+      "unit": "MB/s",
+      "samples": [
+        186.04077022207133,
+        182.0870520707049,
+        186.56732743089216,
+        172.0770839540224,
+        183.90955316041186
+      ],
+      "mean": 182.13635736762055,
+      "stdev": 5.899440045059547,
+      "min_val": 172.0770839540224,
+      "max_val": 186.56732743089216,
+      "metadata": {
+        "file_size": "16MB",
+        "data": 8,
+        "par": 4
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "cfs_decode_read [16MB]",
+      "category": "I/O Pipeline",
+      "value": 177.79862372042214,
+      "unit": "MB/s",
+      "samples": [
+        177.7985328914273,
+        174.42210960023365,
+        181.28757971421595,
+        178.5353369191471,
+        176.9495594770867
+      ],
+      "mean": 177.79862372042214,
+      "stdev": 2.4918526223072597,
+      "min_val": 174.42210960023365,
+      "max_val": 181.28757971421595,
+      "metadata": {
+        "file_size": "16MB",
+        "data": 8,
+        "par": 4
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "cfs_full_roundtrip [16MB]",
+      "category": "I/O Pipeline",
+      "value": 90.46498244368003,
+      "unit": "MB/s",
+      "samples": [
+        91.64389006622764,
+        91.68881047487899,
+        88.07382045496054,
+        90.28428468256445,
+        90.63410653976852
+      ],
+      "mean": 90.46498244368003,
+      "stdev": 1.4719450167632,
+      "min_val": 88.07382045496054,
+      "max_val": 91.68881047487899,
+      "metadata": {
+        "file_size": "16MB",
+        "verified": "sha256"
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "pipeline_overhead_pct [16MB]",
+      "category": "I/O Pipeline",
+      "value": 1725.1675103591244,
+      "unit": "%",
+      "samples": [
+        1665.9876317208834,
+        1742.7350684562177,
+        1679.5292403244375,
+        1697.9154408021664,
+        1839.6701704919171
+      ],
+      "mean": 1725.1675103591244,
+      "stdev": 70.26247806887008,
+      "min_val": 1665.9876317208834,
+      "max_val": 1839.6701704919171,
+      "metadata": {
+        "file_size": "16MB",
+        "raw_mean_ms": 4.81,
+        "pipe_mean_ms": 87.7
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "raw_disk_write [64MB]",
+      "category": "I/O Pipeline",
+      "value": 3332.4025636804627,
+      "unit": "MB/s",
+      "samples": [
+        3334.0128070828323,
+        3338.1646324824046,
+        3313.58591956356,
+        3340.3222681378934,
+        3335.9271911356236
+      ],
+      "mean": 3332.4025636804627,
+      "stdev": 10.781988846058077,
+      "min_val": 3313.58591956356,
+      "max_val": 3340.3222681378934,
+      "metadata": {
+        "file_size": "64MB"
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "raw_disk_read [64MB]",
+      "category": "I/O Pipeline",
+      "value": 3276.810745978917,
+      "unit": "MB/s",
+      "samples": [
+        3310.015998199322,
+        3262.924687194479,
+        3263.1615916735564,
+        3297.4039792800345,
+        3250.5474735471944
+      ],
+      "mean": 3276.810745978917,
+      "stdev": 25.473277927341154,
+      "min_val": 3250.5474735471944,
+      "max_val": 3310.015998199322,
+      "metadata": {
+        "file_size": "64MB"
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "cfs_encode_write [64MB]",
+      "category": "I/O Pipeline",
+      "value": 1043.8446468354564,
+      "unit": "MB/s",
+      "samples": [
+        1072.3934798003359,
+        1018.5256770951847,
+        970.421890454241,
+        1113.7769633140679,
+        1044.105223513453
+      ],
+      "mean": 1043.8446468354564,
+      "stdev": 54.170065615731176,
+      "min_val": 970.421890454241,
+      "max_val": 1113.7769633140679,
+      "metadata": {
+        "file_size": "64MB",
+        "data": 8,
+        "par": 4
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "cfs_encode_encrypt_write [64MB]",
+      "category": "I/O Pipeline",
+      "value": 176.58843705755257,
+      "unit": "MB/s",
+      "samples": [
+        179.31810934194743,
+        175.66031802599508,
+        177.1089656192357,
+        177.34605150255263,
+        173.50874079803205
+      ],
+      "mean": 176.58843705755257,
+      "stdev": 2.158817639278386,
+      "min_val": 173.50874079803205,
+      "max_val": 179.31810934194743,
+      "metadata": {
+        "file_size": "64MB",
+        "data": 8,
+        "par": 4
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "cfs_full_write_pipeline [64MB]",
+      "category": "I/O Pipeline",
+      "value": 159.16913078179908,
+      "unit": "MB/s",
+      "samples": [
+        175.6266542375957,
+        174.3715468472691,
+        173.08115760930866,
+        126.18186668772431,
+        146.58442852709774
+      ],
+      "mean": 159.16913078179908,
+      "stdev": 22.034304766810898,
+      "min_val": 126.18186668772431,
+      "max_val": 175.6266542375957,
+      "metadata": {
+        "file_size": "64MB",
+        "data": 8,
+        "par": 4
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "cfs_decode_read [64MB]",
+      "category": "I/O Pipeline",
+      "value": 154.22386189857806,
+      "unit": "MB/s",
+      "samples": [
+        159.3478434773101,
+        162.37637871354096,
+        149.86951819963932,
+        156.18201355224855,
+        143.3435555501514
+      ],
+      "mean": 154.22386189857806,
+      "stdev": 7.646804084392247,
+      "min_val": 143.3435555501514,
+      "max_val": 162.37637871354096,
+      "metadata": {
+        "file_size": "64MB",
+        "data": 8,
+        "par": 4
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "cfs_full_roundtrip [64MB]",
+      "category": "I/O Pipeline",
+      "value": 81.42820340619436,
+      "unit": "MB/s",
+      "samples": [
+        80.48604992170297,
+        81.52868121801183,
+        82.28877982270149,
+        80.57206630341885,
+        82.26543976513665
+      ],
+      "mean": 81.42820340619436,
+      "stdev": 0.8763954882270504,
+      "min_val": 80.48604992170297,
+      "max_val": 82.28877982270149,
+      "metadata": {
+        "file_size": "64MB",
+        "verified": "sha256"
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "pipeline_overhead_pct [64MB]",
+      "category": "I/O Pipeline",
+      "value": 1862.2250071108065,
+      "unit": "%",
+      "samples": [
+        1861.1376298728353,
+        1862.4609063405692,
+        1827.8751974073468,
+        1870.2714490908224,
+        1889.379852842459
+      ],
+      "mean": 1862.2250071108065,
+      "stdev": 22.26700664444912,
+      "min_val": 1827.8751974073468,
+      "max_val": 1889.379852842459,
+      "metadata": {
+        "file_size": "64MB",
+        "raw_mean_ms": 19.62,
+        "pipe_mean_ms": 385.01
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "encode_throughput [data=4, par=2]",
+      "category": "Sharding",
+      "value": 617.7867316772407,
+      "unit": "MB/s",
+      "samples": [
+        668.6158973046421,
+        544.3584864304386,
+        660.7834891795495,
+        623.4089477899921,
+        591.7668376815811
+      ],
+      "mean": 617.7867316772407,
+      "stdev": 51.31441471866973,
+      "min_val": 544.3584864304386,
+      "max_val": 668.6158973046421,
+      "metadata": {
+        "data": 4,
+        "par": 2,
+        "file_size": "4MB"
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "encode_throughput [data=6, par=3]",
+      "category": "Sharding",
+      "value": 617.5381998763144,
+      "unit": "MB/s",
+      "samples": [
+        660.5820438860138,
+        633.1538339848056,
+        590.7833953732264,
+        650.5179905944531,
+        552.6537355430729
+      ],
+      "mean": 617.5381998763144,
+      "stdev": 45.02804794615235,
+      "min_val": 552.6537355430729,
+      "max_val": 660.5820438860138,
+      "metadata": {
+        "data": 6,
+        "par": 3,
+        "file_size": "4MB"
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "encode_throughput [data=8, par=4]",
+      "category": "Sharding",
+      "value": 587.779231415124,
+      "unit": "MB/s",
+      "samples": [
+        561.4474036038041,
+        580.1757170433791,
+        595.3952716175443,
+        551.1858015124711,
+        650.6919632984213
+      ],
+      "mean": 587.779231415124,
+      "stdev": 39.07132452359159,
+      "min_val": 551.1858015124711,
+      "max_val": 650.6919632984213,
+      "metadata": {
+        "data": 8,
+        "par": 4,
+        "file_size": "4MB"
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "encode_throughput [data=12, par=6]",
+      "category": "Sharding",
+      "value": 567.7070300734503,
+      "unit": "MB/s",
+      "samples": [
+        530.7470447892284,
+        554.0055773759168,
+        620.9122594782455,
+        573.1334791665562,
+        559.7367895573042
+      ],
+      "mean": 567.7070300734503,
+      "stdev": 33.45720340186404,
+      "min_val": 530.7470447892284,
+      "max_val": 620.9122594782455,
+      "metadata": {
+        "data": 12,
+        "par": 6,
+        "file_size": "4MB"
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "encode_throughput [data=16, par=8]",
+      "category": "Sharding",
+      "value": 574.9448855096869,
+      "unit": "MB/s",
+      "samples": [
+        594.0548448541172,
+        567.828702161431,
+        563.7162883567271,
+        567.0109926215235,
+        582.1135995546357
+      ],
+      "mean": 574.9448855096869,
+      "stdev": 12.808679899137971,
+      "min_val": 563.7162883567271,
+      "max_val": 594.0548448541172,
+      "metadata": {
+        "data": 16,
+        "par": 8,
+        "file_size": "4MB"
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "encode_throughput [data=24, par=12]",
+      "category": "Sharding",
+      "value": 580.1306356875058,
+      "unit": "MB/s",
+      "samples": [
+        615.9455051151025,
+        596.8153953420566,
+        538.3932188262312,
+        604.7575343488527,
+        544.741524805286
+      ],
+      "mean": 580.1306356875058,
+      "stdev": 35.92343020163872,
+      "min_val": 538.3932188262312,
+      "max_val": 615.9455051151025,
+      "metadata": {
+        "data": 24,
+        "par": 12,
+        "file_size": "4MB"
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "encode_throughput [data=32, par=16]",
+      "category": "Sharding",
+      "value": 527.4078037217857,
+      "unit": "MB/s",
+      "samples": [
+        513.0074946695562,
+        567.0863913842879,
+        548.4351907237004,
+        505.86180468721335,
+        502.64813714417056
+      ],
+      "mean": 527.4078037217857,
+      "stdev": 28.727954100715888,
+      "min_val": 502.64813714417056,
+      "max_val": 567.0863913842879,
+      "metadata": {
+        "data": 32,
+        "par": 16,
+        "file_size": "4MB"
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "decode_throughput [missing=0]",
+      "category": "Sharding",
+      "value": 542.497469836214,
+      "unit": "MB/s",
+      "samples": [
+        536.264413706361,
+        561.4110761137882,
+        538.8091431903415,
+        546.8736323459308,
+        529.1290838246487
+      ],
+      "mean": 542.497469836214,
+      "stdev": 12.329271951876489,
+      "min_val": 529.1290838246487,
+      "max_val": 561.4110761137882,
+      "metadata": {
+        "missing_shards": 0,
+        "data": 8,
+        "par": 4
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "decode_throughput [missing=1]",
+      "category": "Sharding",
+      "value": 541.7725221047168,
+      "unit": "MB/s",
+      "samples": [
+        539.4564509081393,
+        522.9034977746984,
+        531.4971190270101,
+        592.1149602361447,
+        522.8905825775914
+      ],
+      "mean": 541.7725221047168,
+      "stdev": 28.973595266580464,
+      "min_val": 522.8905825775914,
+      "max_val": 592.1149602361447,
+      "metadata": {
+        "missing_shards": 1,
+        "data": 8,
+        "par": 4
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "decode_throughput [missing=2]",
+      "category": "Sharding",
+      "value": 564.4340950101305,
+      "unit": "MB/s",
+      "samples": [
+        548.0605966951503,
+        583.376115445783,
+        542.5401685367444,
+        544.2270159864102,
+        603.9665783865645
+      ],
+      "mean": 564.4340950101305,
+      "stdev": 27.737064040090292,
+      "min_val": 542.5401685367444,
+      "max_val": 603.9665783865645,
+      "metadata": {
+        "missing_shards": 2,
+        "data": 8,
+        "par": 4
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "decode_throughput [missing=3]",
+      "category": "Sharding",
+      "value": 586.9916349019121,
+      "unit": "MB/s",
+      "samples": [
+        558.1271224119033,
+        580.503250614876,
+        650.842086739878,
+        592.7171885670953,
+        552.768526175808
+      ],
+      "mean": 586.9916349019121,
+      "stdev": 39.23054469258033,
+      "min_val": 552.768526175808,
+      "max_val": 650.842086739878,
+      "metadata": {
+        "missing_shards": 3,
+        "data": 8,
+        "par": 4
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "decode_throughput [missing=4]",
+      "category": "Sharding",
+      "value": 569.4398121561597,
+      "unit": "MB/s",
+      "samples": [
+        589.5514721045918,
+        566.2384255683315,
+        577.7922927840458,
+        548.5285930608593,
+        565.0882772629705
+      ],
+      "mean": 569.4398121561597,
+      "stdev": 15.335470440971195,
+      "min_val": 548.5285930608593,
+      "max_val": 589.5514721045918,
+      "metadata": {
+        "missing_shards": 4,
+        "data": 8,
+        "par": 4
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "parallel_encode [workers=1]",
+      "category": "Sharding",
+      "value": 363.6419603697507,
+      "unit": "MB/s",
+      "samples": [
+        358.3947091692928,
+        366.21961138005196,
+        357.5671793871483,
+        371.8924084989968,
+        364.13589341326355
+      ],
+      "mean": 363.6419603697507,
+      "stdev": 5.903277861981766,
+      "min_val": 357.5671793871483,
+      "max_val": 371.8924084989968,
+      "metadata": {
+        "workers": 1,
+        "files_per_run": 4
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "parallel_encode [workers=2]",
+      "category": "Sharding",
+      "value": 668.6052508454152,
+      "unit": "MB/s",
+      "samples": [
+        669.4272705666193,
+        683.8384200107453,
+        668.2600206314211,
+        680.489792555583,
+        641.0107504627075
+      ],
+      "mean": 668.6052508454152,
+      "stdev": 16.848910396330076,
+      "min_val": 641.0107504627075,
+      "max_val": 683.8384200107453,
+      "metadata": {
+        "workers": 2,
+        "files_per_run": 4
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "parallel_encode [workers=4]",
+      "category": "Sharding",
+      "value": 1069.4477745961785,
+      "unit": "MB/s",
+      "samples": [
+        1075.8643025443632,
+        1093.1769385251278,
+        1081.471302172496,
+        1079.6731433722584,
+        1017.0531863666475
+      ],
+      "mean": 1069.4477745961785,
+      "stdev": 29.994004856821746,
+      "min_val": 1017.0531863666475,
+      "max_val": 1093.1769385251278,
+      "metadata": {
+        "workers": 4,
+        "files_per_run": 4
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "parallel_encode [workers=8]",
+      "category": "Sharding",
+      "value": 1563.9783885673091,
+      "unit": "MB/s",
+      "samples": [
+        1645.6977126758989,
+        1430.3430084397125,
+        1353.8584873762964,
+        1595.5738911321334,
+        1794.4188432125043
+      ],
+      "mean": 1563.9783885673091,
+      "stdev": 175.2055325542982,
+      "min_val": 1353.8584873762964,
+      "max_val": 1794.4188432125043,
+      "metadata": {
+        "workers": 8,
+        "files_per_run": 8
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "shard_size_distribution [1MB]",
+      "category": "Sharding",
+      "value": 0.0,
+      "unit": "bytes_stdev",
+      "samples": [
+        0.0
+      ],
+      "mean": 0.0,
+      "stdev": 0.0,
+      "min_val": 0.0,
+      "max_val": 0.0,
+      "metadata": {
+        "mean_shard_bytes": 131072,
+        "n_shards": 12,
+        "file_size": "1MB"
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "shard_size_distribution [4MB]",
+      "category": "Sharding",
+      "value": 0.0,
+      "unit": "bytes_stdev",
+      "samples": [
+        0.0
+      ],
+      "mean": 0.0,
+      "stdev": 0.0,
+      "min_val": 0.0,
+      "max_val": 0.0,
+      "metadata": {
+        "mean_shard_bytes": 524288,
+        "n_shards": 12,
+        "file_size": "4MB"
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "shard_size_distribution [16MB]",
+      "category": "Sharding",
+      "value": 0.0,
+      "unit": "bytes_stdev",
+      "samples": [
+        0.0
+      ],
+      "mean": 0.0,
+      "stdev": 0.0,
+      "min_val": 0.0,
+      "max_val": 0.0,
+      "metadata": {
+        "mean_shard_bytes": 2097152,
+        "n_shards": 12,
+        "file_size": "16MB"
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "optimal_shard_config_finder [4MB]",
+      "category": "Sharding",
+      "value": 723.9848693595598,
+      "unit": "MB/s",
+      "samples": [
+        723.9848693595598
+      ],
+      "mean": 723.9848693595598,
+      "stdev": 0.0,
+      "min_val": 723.9848693595598,
+      "max_val": 723.9848693595598,
+      "metadata": {
+        "best_config": "16+4",
+        "all_configs": {
+          "4+2": 609.39,
+          "6+3": 614.63,
+          "8+4": 711.03,
+          "12+4": 638.6,
+          "16+4": 723.98,
+          "16+8": 547.76,
+          "24+6": 670.53
+        }
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "parity_ratio_throughput [data=8, par=2]",
+      "category": "Sharding",
+      "value": 679.7773516995851,
+      "unit": "MB/s",
+      "samples": [
+        672.2551208044412,
+        666.7211088828477,
+        647.9763243187687,
+        752.1700933098624,
+        659.7641111820058
+      ],
+      "mean": 679.7773516995851,
+      "stdev": 41.47165782336099,
+      "min_val": 647.9763243187687,
+      "max_val": 752.1700933098624,
+      "metadata": {
+        "data": 8,
+        "par": 2,
+        "storage_overhead_pct": 25.0
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "parity_ratio_throughput [data=8, par=4]",
+      "category": "Sharding",
+      "value": 593.0228576303734,
+      "unit": "MB/s",
+      "samples": [
+        585.4291897898191,
+        618.444772848239,
+        558.4578288720378,
+        629.5498813795133,
+        573.2326152622578
+      ],
+      "mean": 593.0228576303734,
+      "stdev": 30.10214250946505,
+      "min_val": 558.4578288720378,
+      "max_val": 629.5498813795133,
+      "metadata": {
+        "data": 8,
+        "par": 4,
+        "storage_overhead_pct": 50.0
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "parity_ratio_throughput [data=8, par=6]",
+      "category": "Sharding",
+      "value": 535.8707355804319,
+      "unit": "MB/s",
+      "samples": [
+        556.2491730344407,
+        516.3978900086062,
+        624.734976404893,
+        437.0606931700542,
+        544.9109452841651
+      ],
+      "mean": 535.8707355804319,
+      "stdev": 68.07436301146537,
+      "min_val": 437.0606931700542,
+      "max_val": 624.734976404893,
+      "metadata": {
+        "data": 8,
+        "par": 6,
+        "storage_overhead_pct": 75.0
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "parity_ratio_throughput [data=8, par=8]",
+      "category": "Sharding",
+      "value": 503.3400636546624,
+      "unit": "MB/s",
+      "samples": [
+        485.19694461984017,
+        502.2752374361273,
+        454.39612646305494,
+        459.1445727782896,
+        615.6874369759998
+      ],
+      "mean": 503.3400636546624,
+      "stdev": 65.76661257243477,
+      "min_val": 454.39612646305494,
+      "max_val": 615.6874369759998,
+      "metadata": {
+        "data": 8,
+        "par": 8,
+        "storage_overhead_pct": 100.0
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "small_file_sharding_overhead [1KB]",
+      "category": "Sharding",
+      "value": 1.051691803149879,
+      "unit": "ms",
+      "samples": [
+        0.9466599440202117,
+        1.312360051088035,
+        0.9055309928953648,
+        0.8748109685257077,
+        1.2190970592200756
+      ],
+      "mean": 1.051691803149879,
+      "stdev": 0.1997836071771843,
+      "min_val": 0.8748109685257077,
+      "max_val": 1.312360051088035,
+      "metadata": {
+        "file_size": "1KB",
+        "file_bytes": 1024
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "small_file_sharding_overhead [4KB]",
+      "category": "Sharding",
+      "value": 1.0834131622686982,
+      "unit": "ms",
+      "samples": [
+        1.2039089342579246,
+        0.9329880122095346,
+        0.8717919699847698,
+        1.2175289448350668,
+        1.1908479500561953
+      ],
+      "mean": 1.0834131622686982,
+      "stdev": 0.16692795049182663,
+      "min_val": 0.8717919699847698,
+      "max_val": 1.2175289448350668,
+      "metadata": {
+        "file_size": "4KB",
+        "file_bytes": 4096
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "small_file_sharding_overhead [16KB]",
+      "category": "Sharding",
+      "value": 1.1685558361932635,
+      "unit": "ms",
+      "samples": [
+        1.1544260196387768,
+        1.206560991704464,
+        1.1975300731137395,
+        1.173991011455655,
+        1.1102710850536823
+      ],
+      "mean": 1.1685558361932635,
+      "stdev": 0.03843892334585373,
+      "min_val": 1.1102710850536823,
+      "max_val": 1.206560991704464,
+      "metadata": {
+        "file_size": "16KB",
+        "file_bytes": 16384
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "memory_during_encode [4MB]",
+      "category": "Sharding",
+      "value": 0.0,
+      "unit": "MB_rss_delta",
+      "samples": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "mean": 0.0,
+      "stdev": 0.0,
+      "min_val": 0.0,
+      "max_val": 0.0,
+      "metadata": {
+        "file_size": "4MB",
+        "data": 8,
+        "par": 4
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "encode_linear_scaling",
+      "category": "Sharding",
+      "value": 453.9396430239716,
+      "unit": "MB/s",
+      "samples": [
+        148.96848152085386,
+        255.1584962782419,
+        378.57306800109916,
+        651.7047225312824,
+        835.2934467883807
+      ],
+      "mean": 453.9396430239716,
+      "stdev": 284.05247076856364,
+      "min_val": 148.96848152085386,
+      "max_val": 835.2934467883807,
+      "metadata": {
+        "throughput_cv_pct": 62.57,
+        "interpretation": "lower CV = more linear scaling"
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "shard_count_vs_recovery [data=4, missing=1]",
+      "category": "Sharding",
+      "value": 6.8911963840946555,
+      "unit": "ms",
+      "samples": [
+        7.2742660995572805,
+        7.324679987505078,
+        6.728564971126616,
+        7.024521939456463,
+        6.10394892282784
+      ],
+      "mean": 6.8911963840946555,
+      "stdev": 0.4996583049439544,
+      "min_val": 6.10394892282784,
+      "max_val": 7.324679987505078,
+      "metadata": {
+        "data": 4,
+        "par": 2,
+        "missing": 1
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "shard_count_vs_recovery [data=8, missing=2]",
+      "category": "Sharding",
+      "value": 6.674019782803953,
+      "unit": "ms",
+      "samples": [
+        6.936889025382698,
+        6.44285196904093,
+        7.041821954771876,
+        5.849192966707051,
+        7.0993429981172085
+      ],
+      "mean": 6.674019782803953,
+      "stdev": 0.5289272985380834,
+      "min_val": 5.849192966707051,
+      "max_val": 7.0993429981172085,
+      "metadata": {
+        "data": 8,
+        "par": 4,
+        "missing": 2
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "shard_count_vs_recovery [data=12, missing=3]",
+      "category": "Sharding",
+      "value": 6.708032405003905,
+      "unit": "ms",
+      "samples": [
+        6.514418055303395,
+        6.979567930102348,
+        6.9306070217862725,
+        6.504315999336541,
+        6.61125301849097
+      ],
+      "mean": 6.708032405003905,
+      "stdev": 0.230013119967159,
+      "min_val": 6.504315999336541,
+      "max_val": 6.979567930102348,
+      "metadata": {
+        "data": 12,
+        "par": 4,
+        "missing": 3
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "shard_count_vs_recovery [data=16, missing=4]",
+      "category": "Sharding",
+      "value": 6.241383776068687,
+      "unit": "ms",
+      "samples": [
+        6.474955007433891,
+        6.345244939438999,
+        6.689675967209041,
+        6.561410031281412,
+        5.135632934980094
+      ],
+      "mean": 6.241383776068687,
+      "stdev": 0.6307555541985187,
+      "min_val": 5.135632934980094,
+      "max_val": 6.689675967209041,
+      "metadata": {
+        "data": 16,
+        "par": 4,
+        "missing": 4
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "fernet_encrypt_throughput [4KB]",
+      "category": "Crypto",
+      "value": 55.33200310426662,
+      "unit": "MB/s",
+      "samples": [
+        49.739597570122825,
+        53.4210118243055,
+        56.139535584083575,
+        58.04582159884304,
+        59.314048943978165
+      ],
+      "mean": 55.33200310426662,
+      "stdev": 3.8340740709928243,
+      "min_val": 49.739597570122825,
+      "max_val": 59.314048943978165,
+      "metadata": {
+        "chunk_size": "4KB"
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "fernet_encrypt_throughput [64KB]",
+      "category": "Crypto",
+      "value": 259.25601901322744,
+      "unit": "MB/s",
+      "samples": [
+        252.9135209363348,
+        259.6603638343984,
+        262.3822964215547,
+        258.7552911793355,
+        262.5686226945138
+      ],
+      "mean": 259.25601901322744,
+      "stdev": 3.917539359614597,
+      "min_val": 252.9135209363348,
+      "max_val": 262.5686226945138,
+      "metadata": {
+        "chunk_size": "64KB"
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "fernet_encrypt_throughput [512KB]",
+      "category": "Crypto",
+      "value": 424.0728472146923,
+      "unit": "MB/s",
+      "samples": [
+        407.42292234782497,
+        447.25480263677196,
+        416.20920898231856,
+        427.8590988989642,
+        421.6182032075818
+      ],
+      "mean": 424.0728472146923,
+      "stdev": 14.973483567055803,
+      "min_val": 407.42292234782497,
+      "max_val": 447.25480263677196,
+      "metadata": {
+        "chunk_size": "512KB"
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "fernet_encrypt_throughput [4MB]",
+      "category": "Crypto",
+      "value": 407.2248531606078,
+      "unit": "MB/s",
+      "samples": [
+        396.95945192375456,
+        404.77111883771187,
+        408.6219212107669,
+        411.5647209496878,
+        414.2070528811177
+      ],
+      "mean": 407.2248531606078,
+      "stdev": 6.725634527342081,
+      "min_val": 396.95945192375456,
+      "max_val": 414.2070528811177,
+      "metadata": {
+        "chunk_size": "4MB"
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "fernet_decrypt_throughput [4KB]",
+      "category": "Crypto",
+      "value": 133.67688264010172,
+      "unit": "MB/s",
+      "samples": [
+        120.73109845391056,
+        129.49579338983312,
+        134.35530783522327,
+        140.54801038786965,
+        143.25420313367204
+      ],
+      "mean": 133.67688264010172,
+      "stdev": 9.006560950527021,
+      "min_val": 120.73109845391056,
+      "max_val": 143.25420313367204,
+      "metadata": {
+        "chunk_size": "4KB"
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "fernet_decrypt_throughput [64KB]",
+      "category": "Crypto",
+      "value": 363.6020615280852,
+      "unit": "MB/s",
+      "samples": [
+        366.0729758183732,
+        326.2548255697007,
+        365.7943714080337,
+        379.76162777948724,
+        380.12650706483106
+      ],
+      "mean": 363.6020615280852,
+      "stdev": 22.022241913014042,
+      "min_val": 326.2548255697007,
+      "max_val": 380.12650706483106,
+      "metadata": {
+        "chunk_size": "64KB"
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "fernet_decrypt_throughput [512KB]",
+      "category": "Crypto",
+      "value": 407.23866799724715,
+      "unit": "MB/s",
+      "samples": [
+        404.373375703575,
+        402.94117361192747,
+        422.44140889757887,
+        397.8842306486211,
+        408.55315112453326
+      ],
+      "mean": 407.23866799724715,
+      "stdev": 9.314438426495984,
+      "min_val": 397.8842306486211,
+      "max_val": 422.44140889757887,
+      "metadata": {
+        "chunk_size": "512KB"
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "fernet_decrypt_throughput [4MB]",
+      "category": "Crypto",
+      "value": 382.81110511817377,
+      "unit": "MB/s",
+      "samples": [
+        383.0276990328689,
+        380.7912531006851,
+        395.3627914224814,
+        377.9846589863765,
+        376.8891230484569
+      ],
+      "mean": 382.81110511817377,
+      "stdev": 7.4168052097141,
+      "min_val": 376.8891230484569,
+      "max_val": 395.3627914224814,
+      "metadata": {
+        "chunk_size": "4MB"
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "fernet_roundtrip_mbps [64KB]",
+      "category": "Crypto",
+      "value": 186.82284222087182,
+      "unit": "MB/s",
+      "samples": [
+        173.67960022735824,
+        182.63157891156024,
+        190.5737087035387,
+        193.14321073285433,
+        194.08611252904763
+      ],
+      "mean": 186.82284222087182,
+      "stdev": 8.618042865055303,
+      "min_val": 173.67960022735824,
+      "max_val": 194.08611252904763,
+      "metadata": {
+        "chunk_size": "64KB"
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "fernet_roundtrip_mbps [512KB]",
+      "category": "Crypto",
+      "value": 208.39495678808206,
+      "unit": "MB/s",
+      "samples": [
+        203.5852172969972,
+        197.1262897011125,
+        212.4538735879439,
+        213.79956509004342,
+        215.00983826431323
+      ],
+      "mean": 208.39495678808206,
+      "stdev": 7.738825901250597,
+      "min_val": 197.1262897011125,
+      "max_val": 215.00983826431323,
+      "metadata": {
+        "chunk_size": "512KB"
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "fernet_roundtrip_mbps [4MB]",
+      "category": "Crypto",
+      "value": 197.43866136573257,
+      "unit": "MB/s",
+      "samples": [
+        196.35006770385894,
+        187.87014482930073,
+        200.80353565589053,
+        201.43189839331865,
+        200.737660246294
+      ],
+      "mean": 197.43866136573257,
+      "stdev": 5.720429604270059,
+      "min_val": 187.87014482930073,
+      "max_val": 201.43189839331865,
+      "metadata": {
+        "chunk_size": "4MB"
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "parallel_encrypt_speedup [threads=1]",
+      "category": "Crypto",
+      "value": 349.21971376868595,
+      "unit": "MB/s",
+      "samples": [
+        364.2632264426301,
+        341.34785805800243,
+        314.93520422808314,
+        343.2555743557975,
+        382.29670575891646
+      ],
+      "mean": 349.21971376868595,
+      "stdev": 25.462518229737057,
+      "min_val": 314.93520422808314,
+      "max_val": 382.29670575891646,
+      "metadata": {
+        "threads": 1,
+        "chunks": 12,
+        "chunk_size": "512KB"
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "parallel_encrypt_speedup [threads=2]",
+      "category": "Crypto",
+      "value": 377.11677112065826,
+      "unit": "MB/s",
+      "samples": [
+        373.5700899909946,
+        403.58618697981893,
+        387.90692351619185,
+        362.64342353703347,
+        357.8772315792524
+      ],
+      "mean": 377.11677112065826,
+      "stdev": 18.770149065213065,
+      "min_val": 357.8772315792524,
+      "max_val": 403.58618697981893,
+      "metadata": {
+        "threads": 2,
+        "chunks": 12,
+        "chunk_size": "512KB"
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "parallel_encrypt_speedup [threads=4]",
+      "category": "Crypto",
+      "value": 344.99493662106613,
+      "unit": "MB/s",
+      "samples": [
+        357.9647698447848,
+        348.7624887103863,
+        296.4658445507644,
+        374.61141257924754,
+        347.17016742014755
+      ],
+      "mean": 344.99493662106613,
+      "stdev": 29.237608815425762,
+      "min_val": 296.4658445507644,
+      "max_val": 374.61141257924754,
+      "metadata": {
+        "threads": 4,
+        "chunks": 12,
+        "chunk_size": "512KB"
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "parallel_encrypt_speedup [threads=8]",
+      "category": "Crypto",
+      "value": 311.2514282996302,
+      "unit": "MB/s",
+      "samples": [
+        323.8551560923362,
+        313.4842916168164,
+        297.72516974406443,
+        304.8499491395332,
+        316.3425749054008
+      ],
+      "mean": 311.2514282996302,
+      "stdev": 10.16978382976363,
+      "min_val": 297.72516974406443,
+      "max_val": 323.8551560923362,
+      "metadata": {
+        "threads": 8,
+        "chunks": 12,
+        "chunk_size": "512KB"
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "parallel_encrypt_speedup [threads=12]",
+      "category": "Crypto",
+      "value": 315.5742204092233,
+      "unit": "MB/s",
+      "samples": [
+        307.9194415668136,
+        312.76195334131404,
+        331.2757436170266,
+        315.87023738564534,
+        310.04372613531683
+      ],
+      "mean": 315.5742204092233,
+      "stdev": 9.269793811038598,
+      "min_val": 307.9194415668136,
+      "max_val": 331.2757436170266,
+      "metadata": {
+        "threads": 12,
+        "chunks": 12,
+        "chunk_size": "512KB"
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "key_generation_ops_per_sec",
+      "category": "Crypto",
+      "value": 1271709.8419075534,
+      "unit": "ops/s",
+      "samples": [
+        1288302.0966938827,
+        1221000.6015499292,
+        1285537.3095998492,
+        1282709.6577274513,
+        1280999.543966655
+      ],
+      "mean": 1271709.8419075534,
+      "stdev": 28483.43093687013,
+      "min_val": 1221000.6015499292,
+      "max_val": 1288302.0966938827,
+      "metadata": {
+        "n_keys_per_run": 200
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "encryption_overhead_bytes [4KB]",
+      "category": "Crypto",
+      "value": 1464.0,
+      "unit": "bytes",
+      "samples": [
+        1464.0
+      ],
+      "mean": 1464.0,
+      "stdev": 0.0,
+      "min_val": 1464.0,
+      "max_val": 1464.0,
+      "metadata": {
+        "plaintext_bytes": 4096,
+        "ciphertext_bytes": 5560,
+        "overhead_pct": 35.74
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "encryption_overhead_bytes [64KB]",
+      "category": "Crypto",
+      "value": 21944.0,
+      "unit": "bytes",
+      "samples": [
+        21944.0
+      ],
+      "mean": 21944.0,
+      "stdev": 0.0,
+      "min_val": 21944.0,
+      "max_val": 21944.0,
+      "metadata": {
+        "plaintext_bytes": 65536,
+        "ciphertext_bytes": 87480,
+        "overhead_pct": 33.48
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "encryption_overhead_bytes [512KB]",
+      "category": "Crypto",
+      "value": 174860.0,
+      "unit": "bytes",
+      "samples": [
+        174860.0
+      ],
+      "mean": 174860.0,
+      "stdev": 0.0,
+      "min_val": 174860.0,
+      "max_val": 174860.0,
+      "metadata": {
+        "plaintext_bytes": 524288,
+        "ciphertext_bytes": 699148,
+        "overhead_pct": 33.35
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "fernet_vs_aesgcm [fernet_encrypt, 1MB]",
+      "category": "Crypto",
+      "value": 431.139512020327,
+      "unit": "MB/s",
+      "samples": [
+        415.83015953428605,
+        444.816314681717,
+        430.5514083298448,
+        432.03113222944097,
+        432.4685453263463
+      ],
+      "mean": 431.139512020327,
+      "stdev": 10.299737698808414,
+      "min_val": 415.83015953428605,
+      "max_val": 444.816314681717,
+      "metadata": {
+        "algorithm": "Fernet",
+        "op": "encrypt"
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "fernet_vs_aesgcm [aesgcm_encrypt, 1MB]",
+      "category": "Crypto",
+      "value": 4104.607808228441,
+      "unit": "MB/s",
+      "samples": [
+        3869.925624779246,
+        4062.416305783572,
+        4178.662580399734,
+        4191.46739169683,
+        4220.567138482825
+      ],
+      "mean": 4104.607808228441,
+      "stdev": 144.33564433441802,
+      "min_val": 3869.925624779246,
+      "max_val": 4220.567138482825,
+      "metadata": {
+        "algorithm": "AES-256-GCM",
+        "op": "encrypt"
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "fernet_vs_aesgcm [fernet_decrypt, 1MB]",
+      "category": "Crypto",
+      "value": 405.0776561778723,
+      "unit": "MB/s",
+      "samples": [
+        390.45189182427515,
+        417.0844425687101,
+        411.1500625871846,
+        399.64415078879375,
+        407.05773312039804
+      ],
+      "mean": 405.0776561778723,
+      "stdev": 10.348836981437637,
+      "min_val": 390.45189182427515,
+      "max_val": 417.0844425687101,
+      "metadata": {
+        "algorithm": "Fernet",
+        "op": "decrypt"
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "fernet_vs_aesgcm [aesgcm_decrypt, 1MB]",
+      "category": "Crypto",
+      "value": 4044.524422104901,
+      "unit": "MB/s",
+      "samples": [
+        3744.4620954239185,
+        4101.605316561348,
+        4138.2158189923875,
+        4125.565392630502,
+        4112.77348691635
+      ],
+      "mean": 4044.524422104901,
+      "stdev": 168.29979204328353,
+      "min_val": 3744.4620954239185,
+      "max_val": 4138.2158189923875,
+      "metadata": {
+        "algorithm": "AES-256-GCM",
+        "op": "decrypt"
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "encrypt_12_shards_total_time [4MB]",
+      "category": "Crypto",
+      "value": 14.088119752705097,
+      "unit": "ms",
+      "samples": [
+        13.960548909381032,
+        14.039595960639417,
+        14.142581960186362,
+        14.180592959746718,
+        14.117278973571956
+      ],
+      "mean": 14.088119752705097,
+      "stdev": 0.08802920635888938,
+      "min_val": 13.960548909381032,
+      "max_val": 14.180592959746718,
+      "metadata": {
+        "n_shards": 12,
+        "shard_size_kb": 512,
+        "file_size": "4MB"
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "parallel_12_shards [sequential]",
+      "category": "Crypto",
+      "value": 14.032030175440013,
+      "unit": "ms",
+      "samples": [
+        14.193292940035462,
+        13.948505045846105,
+        14.060250949114561,
+        14.01237293612212,
+        13.94572900608182
+      ],
+      "mean": 14.032030175440013,
+      "stdev": 0.1019961242837554,
+      "min_val": 13.94572900608182,
+      "max_val": 14.193292940035462,
+      "metadata": {
+        "mode": "sequential",
+        "shards": 12
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "parallel_12_shards [4 threads]",
+      "category": "Crypto",
+      "value": 16.90940724220127,
+      "unit": "ms",
+      "samples": [
+        16.777437063865364,
+        15.858043101616204,
+        18.099136999808252,
+        17.254751990549266,
+        16.557667055167258
+      ],
+      "mean": 16.90940724220127,
+      "stdev": 0.8338500666486777,
+      "min_val": 15.858043101616204,
+      "max_val": 18.099136999808252,
+      "metadata": {
+        "mode": "parallel",
+        "shards": 12,
+        "speedup": 0.83
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "hmac_verification_overhead [valid_token, 512KB]",
+      "category": "Crypto",
+      "value": 1.5686265658587217,
+      "unit": "ms",
+      "samples": [
+        2.2355279652401805,
+        1.8562569748610258,
+        1.2144320644438267,
+        1.2351549230515957,
+        1.30176090169698
+      ],
+      "mean": 1.5686265658587217,
+      "stdev": 0.45699099902987633,
+      "min_val": 1.2144320644438267,
+      "max_val": 2.2355279652401805,
+      "metadata": {
+        "token": "valid",
+        "size": "512KB"
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "hmac_verification_overhead [tampered_token, 512KB]",
+      "category": "Crypto",
+      "value": 0.9014577837660909,
+      "unit": "ms",
+      "samples": [
+        0.8694300195202231,
+        1.0524889221414924,
+        0.8616889826953411,
+        0.8614090038463473,
+        0.8622719906270504
+      ],
+      "mean": 0.9014577837660909,
+      "stdev": 0.08449433581187432,
+      "min_val": 0.8614090038463473,
+      "max_val": 1.0524889221414924,
+      "metadata": {
+        "token": "tampered",
+        "overhead_vs_valid_ms": -0.667,
+        "size": "512KB"
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "recovery_time [missing=0, baseline]",
+      "category": "Recovery",
+      "value": 7.313569379039109,
+      "unit": "ms",
+      "samples": [
+        7.321042940020561,
+        7.3209109250456095,
+        7.601691992022097,
+        7.740920991636813,
+        6.583280046470463
+      ],
+      "mean": 7.313569379039109,
+      "stdev": 0.44695533965293155,
+      "min_val": 6.583280046470463,
+      "max_val": 7.740920991636813,
+      "metadata": {
+        "missing": 0,
+        "data": 8,
+        "par": 4,
+        "file_size": "4MB"
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "recovery_time [missing=1]",
+      "category": "Recovery",
+      "value": 7.358194584958255,
+      "unit": "ms",
+      "samples": [
+        7.53403699491173,
+        7.198831997811794,
+        7.393087027594447,
+        7.473874953575432,
+        7.1911419508978724
+      ],
+      "mean": 7.358194584958255,
+      "stdev": 0.15718062865959137,
+      "min_val": 7.1911419508978724,
+      "max_val": 7.53403699491173,
+      "metadata": {
+        "missing": 1,
+        "data": 8,
+        "par": 4,
+        "file_size": "4MB"
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "recovery_time [missing=2]",
+      "category": "Recovery",
+      "value": 7.286015804857016,
+      "unit": "ms",
+      "samples": [
+        7.519175065681338,
+        6.797740003094077,
+        7.221405976451933,
+        7.387942052446306,
+        7.5038159266114235
+      ],
+      "mean": 7.286015804857016,
+      "stdev": 0.29781570744580754,
+      "min_val": 6.797740003094077,
+      "max_val": 7.519175065681338,
+      "metadata": {
+        "missing": 2,
+        "data": 8,
+        "par": 4,
+        "file_size": "4MB"
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "recovery_time [missing=3]",
+      "category": "Recovery",
+      "value": 7.186072808690369,
+      "unit": "ms",
+      "samples": [
+        7.13462196290493,
+        7.432093960233033,
+        7.182946079410613,
+        7.167963078245521,
+        7.01273896265775
+      ],
+      "mean": 7.186072808690369,
+      "stdev": 0.15293459181268398,
+      "min_val": 7.01273896265775,
+      "max_val": 7.432093960233033,
+      "metadata": {
+        "missing": 3,
+        "data": 8,
+        "par": 4,
+        "file_size": "4MB"
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "recovery_time [missing=4, at_tolerance]",
+      "category": "Recovery",
+      "value": 6.649093423038721,
+      "unit": "ms",
+      "samples": [
+        6.4048339845612645,
+        6.7017050459980965,
+        6.596960010938346,
+        7.045928039588034,
+        6.496040034107864
+      ],
+      "mean": 6.649093423038721,
+      "stdev": 0.2480179436895796,
+      "min_val": 6.4048339845612645,
+      "max_val": 7.045928039588034,
+      "metadata": {
+        "missing": 4,
+        "data": 8,
+        "par": 4,
+        "file_size": "4MB"
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "recovery_throughput_mbps [4 missing shards]",
+      "category": "Recovery",
+      "value": 613.8087177408379,
+      "unit": "MB/s",
+      "samples": [
+        580.5402273427034,
+        671.8688345616966,
+        593.9192707528485,
+        606.7492569119173,
+        615.9659991350237
+      ],
+      "mean": 613.8087177408379,
+      "stdev": 35.099321825069985,
+      "min_val": 580.5402273427034,
+      "max_val": 671.8688345616966,
+      "metadata": {
+        "missing": 4,
+        "data": 8,
+        "par": 4
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "time_to_detect_missing_shard",
+      "category": "Recovery",
+      "value": 147.29821123182774,
+      "unit": "\u00b5s",
+      "samples": [
+        189.56896383315325,
+        186.9630068540573,
+        89.95307143777609,
+        180.79299479722977,
+        89.21301923692226
+      ],
+      "mean": 147.29821123182774,
+      "stdev": 52.78344354627972,
+      "min_val": 89.21301923692226,
+      "max_val": 189.56896383315325,
+      "metadata": {
+        "method": "stat_all_shards",
+        "total_shards": 12
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "full_recovery_pipeline [4MB, 2 missing]",
+      "category": "Recovery",
+      "value": 9.445271617732942,
+      "unit": "ms",
+      "samples": [
+        9.193383972160518,
+        8.92124604433775,
+        9.394578053615987,
+        10.097492951899767,
+        9.619657066650689
+      ],
+      "mean": 9.445271617732942,
+      "stdev": 0.4462126674982615,
+      "min_val": 8.92124604433775,
+      "max_val": 10.097492951899767,
+      "metadata": {
+        "missing": 2,
+        "verified": "sha256",
+        "file_size": "4MB"
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "recovery_different_sizes [missing=4, 64KB]",
+      "category": "Recovery",
+      "value": 1.432332186959684,
+      "unit": "ms",
+      "samples": [
+        1.4668689109385014,
+        1.483679050579667,
+        1.4367130352184176,
+        1.4962119748815894,
+        1.278187963180244
+      ],
+      "mean": 1.432332186959684,
+      "stdev": 0.08900778978238072,
+      "min_val": 1.278187963180244,
+      "max_val": 1.4962119748815894,
+      "metadata": {
+        "missing": 4,
+        "file_size": "64KB"
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "recovery_different_sizes [missing=4, 1MB]",
+      "category": "Recovery",
+      "value": 2.810740633867681,
+      "unit": "ms",
+      "samples": [
+        2.744893077760935,
+        2.8374900575727224,
+        2.937138080596924,
+        2.684175968170166,
+        2.850005985237658
+      ],
+      "mean": 2.810740633867681,
+      "stdev": 0.09821930726031693,
+      "min_val": 2.684175968170166,
+      "max_val": 2.937138080596924,
+      "metadata": {
+        "missing": 4,
+        "file_size": "1MB"
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "recovery_different_sizes [missing=4, 16MB]",
+      "category": "Recovery",
+      "value": 19.806662830524147,
+      "unit": "ms",
+      "samples": [
+        19.143839948810637,
+        18.932825070805848,
+        21.088769077323377,
+        20.182093023322523,
+        19.68578703235835
+      ],
+      "mean": 19.806662830524147,
+      "stdev": 0.866354693408097,
+      "min_val": 18.932825070805848,
+      "max_val": 21.088769077323377,
+      "metadata": {
+        "missing": 4,
+        "file_size": "16MB"
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "rolling_reconstruction [3 rounds, 4MB]",
+      "category": "Recovery",
+      "value": 22.057938762009144,
+      "unit": "ms",
+      "samples": [
+        22.527524968609214,
+        21.42963302321732,
+        22.595066926442087,
+        21.928193978965282,
+        21.809274912811816
+      ],
+      "mean": 22.057938762009144,
+      "stdev": 0.4955939342041061,
+      "min_val": 21.42963302321732,
+      "max_val": 22.595066926442087,
+      "metadata": {
+        "rounds": 3,
+        "file_size": "4MB",
+        "data": 8,
+        "par": 4
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "wal_append_ops_per_sec [fsync]",
+      "category": "Journal",
+      "value": 847.0435156788085,
+      "unit": "ops/s",
+      "samples": [
+        828.9757803105658,
+        848.6415832017527,
+        848.5068428883857,
+        855.7395625691836,
+        853.3538094241547
+      ],
+      "mean": 847.0435156788085,
+      "stdev": 10.566210843287005,
+      "min_val": 828.9757803105658,
+      "max_val": 855.7395625691836,
+      "metadata": {
+        "n_ops": 50,
+        "durable": true
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "wal_append_buffered_ops_per_sec [no fsync]",
+      "category": "Journal",
+      "value": 148162.01443311956,
+      "unit": "ops/s",
+      "samples": [
+        147038.0011909313,
+        148457.60006559145,
+        147908.7768169565,
+        148922.56808331364,
+        148483.1260088049
+      ],
+      "mean": 148162.01443311956,
+      "stdev": 723.9579448837093,
+      "min_val": 147038.0011909313,
+      "max_val": 148922.56808331364,
+      "metadata": {
+        "n_ops": 1000,
+        "durable": false
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "wal_vs_direct_json [wal_fsync]",
+      "category": "Journal",
+      "value": 810.3908842652072,
+      "unit": "ops/s",
+      "samples": [
+        833.4315258980496,
+        816.9222772534465,
+        793.4670110225176,
+        830.5751991899837,
+        777.5584079620386
+      ],
+      "mean": 810.3908842652072,
+      "stdev": 24.214282024949657,
+      "min_val": 777.5584079620386,
+      "max_val": 833.4315258980496,
+      "metadata": {
+        "mode": "WAL_fsync",
+        "n_ops": 50
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "wal_vs_direct_json [direct_atomic]",
+      "category": "Journal",
+      "value": 44396.02083538303,
+      "unit": "ops/s",
+      "samples": [
+        34525.141415493345,
+        46509.72245775055,
+        47054.48508251907,
+        46781.78409110961,
+        47108.97113004259
+      ],
+      "mean": 44396.02083538303,
+      "stdev": 5523.164691491869,
+      "min_val": 34525.141415493345,
+      "max_val": 47108.97113004259,
+      "metadata": {
+        "mode": "direct_rename",
+        "n_ops": 50
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "wal_replay_speed",
+      "category": "Journal",
+      "value": 702766.9759726439,
+      "unit": "entries/s",
+      "samples": [
+        728497.1770731458,
+        726816.5616948848,
+        567323.7143382485,
+        741684.0389847296,
+        749513.3877722111
+      ],
+      "mean": 702766.9759726439,
+      "stdev": 76297.22759358352,
+      "min_val": 567323.7143382485,
+      "max_val": 749513.3877722111,
+      "metadata": {
+        "n_entries": 1000
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "journal_checkpoint_time [1000 entries]",
+      "category": "Journal",
+      "value": 20.626913593150675,
+      "unit": "ms",
+      "samples": [
+        19.60477395914495,
+        20.75140702072531,
+        21.178188966587186,
+        20.614766981452703,
+        20.985431037843227
+      ],
+      "mean": 20.626913593150675,
+      "stdev": 0.6109122033068298,
+      "min_val": 19.60477395914495,
+      "max_val": 21.178188966587186,
+      "metadata": {
+        "n_entries": 1000,
+        "includes_deletes": true
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "metadata_write_latency_p50_p99",
+      "category": "Journal",
+      "value": 6.6480133682489395,
+      "unit": "\u00b5s",
+      "samples": [
+        6.294925697147846,
+        6.382935680449009,
+        6.383052095770836,
+        6.386893801391125,
+        6.388057954609394,
+        6.39201607555151,
+        6.4070336520671844,
+        6.412039510905743,
+        6.4140185713768005,
+        6.415997631847858,
+        6.425892934203148,
+        6.427057087421417,
+        6.436021067202091,
+        6.44288957118988,
+        6.458954885601997,
+        6.46605622023344,
+        6.466987542808056,
+        6.475020200014114,
+        6.47595152258873,
+        6.47595152258873,
+        6.480957381427288,
+        6.486079655587673,
+        6.487010978162289,
+        6.490037776529789,
+        6.4909690991044044,
+        6.491085514426231,
+        6.492948159575462,
+        6.497022695839405,
+        6.497022695839405,
+        6.500049494206905,
+        6.5069179981946945,
+        6.5070344135165215,
+        6.510992534458637,
+        6.51204027235508,
+        6.512971594929695,
+        6.512971594929695,
+        6.514950655400753,
+        6.517977453768253,
+        6.519956514239311,
+        6.521004252135754,
+        6.522051990032196,
+        6.524031050503254,
+        6.532995030283928,
+        6.536021828651428,
+        6.536953151226044,
+        6.538932211697102,
+        6.539979949593544,
+        6.541959010064602,
+        6.543006747961044,
+        6.544054485857487,
+        6.545917131006718,
+        6.547081284224987,
+        6.5480126067996025,
+        6.551039405167103,
+        6.551970727741718,
+        6.553018465638161,
+        6.554997526109219,
+        6.556045264005661,
+        6.5569765865802765,
+        6.560003384947777,
+        6.563030183315277,
+        6.563961505889893,
+        6.563961505889893,
+        6.571994163095951,
+        6.5730419009923935,
+        6.5730419009923935,
+        6.577931344509125,
+        6.578047759830952,
+        6.578979082405567,
+        6.58002682030201,
+        6.583984941244125,
+        6.584101356565952,
+        6.585032679140568,
+        6.585032679140568,
+        6.58608041703701,
+        6.587011739611626,
+        6.588059477508068,
+        6.588990800082684,
+        6.588990800082684,
+        6.590038537979126,
+        6.592948921024799,
+        6.592948921024799,
+        6.5980711951851845,
+        6.6020293161273,
+        6.6020293161273,
+        6.6070351749658585,
+        6.607966497540474,
+        6.609014235436916,
+        6.610061973333359,
+        6.61495141685009,
+        6.619025953114033,
+        6.619957275688648,
+        6.625079549849033,
+        6.629037670791149,
+        6.629968993365765,
+        6.6319480538368225,
+        6.63392711430788,
+        6.6390493884682655,
+        6.643938831984997,
+        6.647082045674324,
+        6.6480133682489395,
+        6.653019227087498,
+        6.653950549662113,
+        6.654998287558556,
+        6.658956408500671,
+        6.661051884293556,
+        6.662914529442787,
+        6.665010005235672,
+        6.66698906570673,
+        6.667920388281345,
+        6.671994924545288,
+        6.671994924545288,
+        6.673973985016346,
+        6.675021722912788,
+        6.675021722912788,
+        6.675953045487404,
+        6.676069460809231,
+        6.678979843854904,
+        6.680027581751347,
+        6.680027581751347,
+        6.681075319647789,
+        6.683054380118847,
+        6.687012501060963,
+        6.6909706220030785,
+        6.6909706220030785,
+        6.692018359899521,
+        6.70191366225481,
+        6.705056875944138,
+        6.711925379931927,
+        6.717047654092312,
+        6.721005775034428,
+        6.726011633872986,
+        6.7319488152861595,
+        6.73497561365366,
+        6.73800241202116,
+        6.739981472492218,
+        6.74102921038866,
+        6.741960532963276,
+        6.743008270859718,
+        6.745918653905392,
+        6.746035069227219,
+        6.749993190169334,
+        6.75395131111145,
+        6.75395131111145,
+        6.754999049007893,
+        6.763963028788567,
+        6.77106436342001,
+        6.773974746465683,
+        6.773974746465683,
+        6.775953806936741,
+        6.778049282729626,
+        6.778980605304241,
+        6.783986464142799,
+        6.7870132625103,
+        6.787944585084915,
+        6.787944585084915,
+        6.791087798774242,
+        6.791087798774242,
+        6.8229855969548225,
+        6.8229855969548225,
+        6.832997314631939,
+        6.834045052528381,
+        6.834976375102997,
+        6.836024112999439,
+        6.8480148911476135,
+        6.8480148911476135,
+        6.849062629044056,
+        6.8569788709282875,
+        6.85802660882473,
+        6.85802660882473,
+        6.860936991870403,
+        6.86105340719223,
+        6.866990588605404,
+        6.870017386972904,
+        6.887014023959637,
+        6.917049176990986,
+        6.919959560036659,
+        6.94196205586195,
+        6.984919309616089,
+        7.029040716588497,
+        7.178983651101589,
+        7.2820112109184265,
+        7.4089039117097855,
+        7.422990165650845,
+        7.674098014831543,
+        7.747090421617031,
+        7.836031727492809,
+        7.987953722476959,
+        8.028000593185425,
+        8.085044100880623,
+        8.183997124433517,
+        8.833943866193295,
+        9.323935955762863,
+        10.018004104495049,
+        10.550953447818756,
+        11.045951396226883,
+        11.21999230235815,
+        11.845957487821579,
+        13.992073945701122,
+        32.57603384554386
+      ],
+      "mean": 6.991869886405766,
+      "stdev": 2.0366164996154974,
+      "min_val": 6.294925697147846,
+      "max_val": 32.57603384554386,
+      "metadata": {
+        "p50_us": 6.648,
+        "p99_us": 13.992,
+        "mean_us": 6.992,
+        "n_ops": 200
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "concurrent_metadata_writes [4 threads]",
+      "category": "Journal",
+      "value": 32208.159946263815,
+      "unit": "ops/s",
+      "samples": [
+        41402.334706999194,
+        35486.3842251204,
+        24508.827773215664,
+        33186.45578181134,
+        26456.79724417249
+      ],
+      "mean": 32208.159946263815,
+      "stdev": 6866.48664779193,
+      "min_val": 24508.827773215664,
+      "max_val": 41402.334706999194,
+      "metadata": {
+        "threads": 4,
+        "ops_per_thread": 100
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "crash_recovery_simulation [100 entries, truncate last 10]",
+      "category": "Journal",
+      "value": 0.13976255431771278,
+      "unit": "ms",
+      "samples": [
+        0.1514679752290249,
+        0.1433040015399456,
+        0.135633978061378,
+        0.13507390394806862,
+        0.1333329128101468
+      ],
+      "mean": 0.13976255431771278,
+      "stdev": 0.0075816818920308535,
+      "min_val": 0.1333329128101468,
+      "max_val": 0.1514679752290249,
+      "metadata": {
+        "good_entries": 100,
+        "corrupt_appended": 10,
+        "recovered": 100
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "journal_file_size_growth",
+      "category": "Journal",
+      "value": 139.7426,
+      "unit": "bytes/entry",
+      "samples": [
+        139.7,
+        139.78,
+        139.78,
+        139.732,
+        139.721
+      ],
+      "mean": 139.7426,
+      "stdev": 0.03602499132547084,
+      "min_val": 139.7,
+      "max_val": 139.78,
+      "metadata": {
+        "sample_counts": [
+          10,
+          50,
+          100,
+          500,
+          1000
+        ]
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "tree_scan_latency [100 files]",
+      "category": "Journal",
+      "value": 1.5457678120583296,
+      "unit": "ms",
+      "samples": [
+        2.0271920366212726,
+        2.002183930017054,
+        1.9319510320201516,
+        1.0456480085849762,
+        0.7218640530481935
+      ],
+      "mean": 1.5457678120583296,
+      "stdev": 0.6160681086628901,
+      "min_val": 0.7218640530481935,
+      "max_val": 2.0271920366212726,
+      "metadata": {
+        "n_files": 100,
+        "includes_parse": true
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "tree_scan_latency [1000 files]",
+      "category": "Journal",
+      "value": 7.398146810010076,
+      "unit": "ms",
+      "samples": [
+        7.430662983097136,
+        7.411299040541053,
+        7.3977099964395165,
+        7.359232986345887,
+        7.391829043626785
+      ],
+      "mean": 7.398146810010076,
+      "stdev": 0.026385002039532087,
+      "min_val": 7.359232986345887,
+      "max_val": 7.430662983097136,
+      "metadata": {
+        "n_files": 1000,
+        "includes_parse": true
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "upload_latency_ms",
+      "category": "Cluster",
+      "value": 2.4967547971755266,
+      "unit": "ms",
+      "samples": [
+        1.8021970754489303,
+        2.5288249598816037,
+        2.616495010443032,
+        2.7765469858422875,
+        2.75970995426178
+      ],
+      "mean": 2.4967547971755266,
+      "stdev": 0.40162349479847864,
+      "min_val": 1.8021970754489303,
+      "max_val": 2.7765469858422875,
+      "metadata": {
+        "node": "http://localhost:8001",
+        "file_size": "64KB"
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "upload_to_stored_time_ms",
+      "category": "Cluster",
+      "value": 56.69429663103074,
+      "unit": "ms",
+      "samples": [
+        56.69555603526533,
+        56.58116505946964,
+        56.66073004249483,
+        57.16111999936402,
+        56.37291201855987
+      ],
+      "mean": 56.69429663103074,
+      "stdev": 0.2894560332779083,
+      "min_val": 56.37291201855987,
+      "max_val": 57.16111999936402,
+      "metadata": {
+        "node": "http://localhost:8001",
+        "file_size": "64KB"
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "cross_node_visibility_latency_ms",
+      "category": "Cluster",
+      "value": 0.0,
+      "unit": "ms",
+      "samples": [],
+      "mean": 0.0,
+      "stdev": 0.0,
+      "min_val": 0.0,
+      "max_val": 0.0,
+      "metadata": {},
+      "skipped": true,
+      "skip_reason": "files never appeared on second node"
+    },
+    {
+      "name": "peer_registration_latency_ms",
+      "category": "Cluster",
+      "value": 3.2877668272703886,
+      "unit": "ms",
+      "samples": [
+        4.444309044629335,
+        2.279113046824932,
+        3.284239093773067,
+        1.879584975540638,
+        4.5515879755839705
+      ],
+      "mean": 3.2877668272703886,
+      "stdev": 1.2181137895030352,
+      "min_val": 1.879584975540638,
+      "max_val": 4.5515879755839705,
+      "metadata": {
+        "node": "http://localhost:8001"
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "network_view_aggregation_ms",
+      "category": "Cluster",
+      "value": 26.35476184077561,
+      "unit": "ms",
+      "samples": [
+        28.09077105484903,
+        31.46559908054769,
+        24.31114506907761,
+        24.187691044062376,
+        23.71860295534134
+      ],
+      "mean": 26.35476184077561,
+      "stdev": 3.352472382420758,
+      "min_val": 23.71860295534134,
+      "max_val": 31.46559908054769,
+      "metadata": {
+        "node": "http://localhost:8001"
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "node_failure_detection_ms",
+      "category": "Cluster",
+      "value": 0.0,
+      "unit": "ms",
+      "samples": [],
+      "mean": 0.0,
+      "stdev": 0.0,
+      "min_val": 0.0,
+      "max_val": 0.0,
+      "metadata": {},
+      "skipped": true,
+      "skip_reason": "cluster did not report unhealthy peer within 30s"
+    },
+    {
+      "name": "node_recovery_time_ms",
+      "category": "Cluster",
+      "value": 2.7987751876935363,
+      "unit": "ms",
+      "samples": [
+        2.1915959659963846,
+        2.802552073262632,
+        5.007621017284691,
+        2.2470259573310614,
+        1.7450809245929122
+      ],
+      "mean": 2.7987751876935363,
+      "stdev": 1.2905792870184642,
+      "min_val": 1.7450809245929122,
+      "max_val": 5.007621017284691,
+      "metadata": {
+        "note": "health check latency as proxy for recovery confirmation"
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "concurrent_uploads_throughput [5 concurrent]",
+      "category": "Cluster",
+      "value": 18.339161590872262,
+      "unit": "MB/s",
+      "samples": [
+        21.605920811494904,
+        17.117193088885806,
+        16.988267726746443,
+        17.398773706619355,
+        18.585652620614802
+      ],
+      "mean": 18.339161590872262,
+      "stdev": 1.9322864861412283,
+      "min_val": 16.988267726746443,
+      "max_val": 21.605920811494904,
+      "metadata": {
+        "concurrent": 5,
+        "file_size": "64KB"
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "peer_chunk_fetch_throughput",
+      "category": "Cluster",
+      "value": 202.437081638433,
+      "unit": "MB/s",
+      "samples": [
+        233.75145842700016,
+        85.37502035499105,
+        80.13452283847559,
+        235.6951980757467,
+        377.2292084959515
+      ],
+      "mean": 202.437081638433,
+      "stdev": 123.7946103379853,
+      "min_val": 80.13452283847559,
+      "max_val": 377.2292084959515,
+      "metadata": {
+        "from_node": "http://localhost:8002",
+        "file_size": "512KB"
+      },
+      "skipped": false,
+      "skip_reason": ""
+    },
+    {
+      "name": "health_endpoint_latency_p50_p99",
+      "category": "Cluster",
+      "value": 1.6368560027331114,
+      "unit": "ms",
+      "samples": [
+        0.6121010519564152,
+        0.61541807372123,
+        0.6768309976905584,
+        0.6770920008420944,
+        0.681632081978023,
+        0.6846400210633874,
+        0.7024749647825956,
+        0.7341150194406509,
+        0.7405719952657819,
+        0.7438618922606111,
+        0.7641860283911228,
+        0.8229379309341311,
+        0.8893490303307772,
+        0.9794810321182013,
+        0.9808560134842992,
+        1.015215995721519,
+        1.1364240199327469,
+        1.1453781044110656,
+        1.1559890117496252,
+        1.1641019955277443,
+        1.169468043372035,
+        1.1813309974968433,
+        1.188448048196733,
+        1.2054210528731346,
+        1.2160619953647256,
+        1.2192489812150598,
+        1.220538979396224,
+        1.2221109354868531,
+        1.2235300382599235,
+        1.227300032041967,
+        1.23257702216506,
+        1.237203017808497,
+        1.2423599837347865,
+        1.2707009445875883,
+        1.2764970306307077,
+        1.2788960011675954,
+        1.2870560167357326,
+        1.2924940092489123,
+        1.2974520213901997,
+        1.3259629486128688,
+        1.3347739586606622,
+        1.3595080235973,
+        1.3728460762649775,
+        1.3829029630869627,
+        1.3938200427219272,
+        1.394901075400412,
+        1.538709970191121,
+        1.586651080287993,
+        1.5957430005073547,
+        1.5963229816406965,
+        1.6368560027331114,
+        1.6678450629115105,
+        1.6963989473879337,
+        1.6972949961200356,
+        1.6977180493995547,
+        1.7081380356103182,
+        1.7111580818891525,
+        1.7210660735145211,
+        1.7232369864359498,
+        1.7254820559173822,
+        1.7265110509470105,
+        1.7266209470108151,
+        1.7314859433099627,
+        1.7333700088784099,
+        1.7360169440507889,
+        1.7407659906893969,
+        1.7605640459805727,
+        1.7647279892116785,
+        1.7648409120738506,
+        1.7661390593275428,
+        1.7669100780040026,
+        1.7685099737718701,
+        1.7688050866127014,
+        1.7697260482236743,
+        1.7703559715300798,
+        1.7754919826984406,
+        1.7755089793354273,
+        1.777615980245173,
+        1.7837780760601163,
+        1.7892069881781936,
+        1.7898690421134233,
+        1.7961489502340555,
+        1.7978809773921967,
+        1.7987230094149709,
+        1.7990550259128213,
+        1.8026370089501143,
+        1.8065670737996697,
+        1.8180669285356998,
+        1.835326082073152,
+        1.844502054154873,
+        1.8522440223023295,
+        1.8888629274442792,
+        1.9259570399299264,
+        1.9546130206435919,
+        2.5369200157001615,
+        2.6158259715884924,
+        2.693597925826907,
+        3.5844079684466124,
+        4.930914961732924,
+        11.822556960396469
+      ],
+      "mean": 1.6237031784839928,
+      "stdev": 1.1850863894181667,
+      "min_val": 0.6121010519564152,
+      "max_val": 11.822556960396469,
+      "metadata": {
+        "p50_ms": 1.637,
+        "p99_ms": 11.823,
+        "n_samples": 100
+      },
+      "skipped": false,
+      "skip_reason": ""
+    }
+  ]
+}
