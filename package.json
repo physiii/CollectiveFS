@@ -1,0 +1,29 @@
+{
+  "name": "collectivefs",
+  "version": "1.0.0",
+  "description": "The objective of CollectiveFS is to create a public file system where users can store personal files. I draw from protocols such as BitTorrent and BitCoin to create resilant distributed networks.",
+  "main": "playwright.config.js",
+  "directories": {
+    "doc": "docs",
+    "lib": "lib",
+    "test": "tests"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/physiii/collectivefs.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "bugs": {
+    "url": "https://github.com/physiii/collectivefs/issues"
+  },
+  "homepage": "https://github.com/physiii/collectivefs#readme",
+  "devDependencies": {
+    "@playwright/test": "^1.59.0"
+  }
+}
