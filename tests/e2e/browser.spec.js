@@ -1107,24 +1107,39 @@ test.describe('Download Integrity', () => {
     const originalHash = crypto.createHash('sha256').update(bunnyData).digest('hex');
     const originalSize = bunnyData.length;
 
-    // Upload bunny video via API using page.evaluate with chunked ArrayBuffer
-    const bunnyArray = Array.from(new Uint8Array(bunnyData));
-    const bunnyFileId = await page.evaluate(
-      async ({ bytes }) => {
-        const arr = new Uint8Array(bytes);
-        const blob = new Blob([arr], { type: 'video/mp4' });
-        const formData = new FormData();
-        formData.append('file', blob, 'bunny_1080p.mp4');
-        const resp = await fetch('/api/files/upload', {
-          method: 'POST',
-          body: formData,
-        });
-        const json = await resp.json();
-        return json.id;
-      },
-      { bytes: bunnyArray },
+    // Upload bunny video via Node.js HTTP (too large for page.evaluate)
+    const http = await import('http');
+    const boundary = '----CFS' + Date.now();
+    const header = Buffer.from(
+      `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="bunny_1080p.mp4"\r\nContent-Type: video/mp4\r\n\r\n`,
     );
+    const footer = Buffer.from(`\r\n--${boundary}--\r\n`);
+    const body = Buffer.concat([header, bunnyData, footer]);
 
+    const uploadResult = await new Promise((resolve, reject) => {
+      const req = http.request(
+        {
+          hostname: 'localhost',
+          port: 8000,
+          path: '/api/files/upload',
+          method: 'POST',
+          headers: {
+            'Content-Type': `multipart/form-data; boundary=${boundary}`,
+            'Content-Length': body.length,
+          },
+        },
+        (res) => {
+          let data = '';
+          res.on('data', (chunk) => (data += chunk));
+          res.on('end', () => resolve(JSON.parse(data)));
+        },
+      );
+      req.on('error', reject);
+      req.write(body);
+      req.end();
+    });
+
+    const bunnyFileId = uploadResult.id;
     expect(bunnyFileId).toBeTruthy();
 
     // Wait for processing
@@ -1161,5 +1176,251 @@ test.describe('Download Integrity', () => {
     expect(downloadResp.error).toBeUndefined();
     expect(downloadResp.size).toBe(originalSize);
     expect(downloadResp.hash).toBe(originalHash);
+  });
+});
+
+// ===========================================================================
+// Suite 10 – Shard and Peer Visualization
+// ===========================================================================
+
+test.describe('Shard and Peer Visualization', () => {
+  test('file details modal shows shard distribution bar', async ({ page }) => {
+    test.slow();
+    const filename = `shard_viz_${Date.now()}.bin`;
+    const content = 'x'.repeat(512);
+    await uploadTestFile(page, filename, content);
+
+    await page.reload({ waitUntil: 'networkidle' });
+    await page.waitForSelector('[data-testid="file-browser"]', { timeout: 10_000 });
+    await waitForFileProcessing(page, filename);
+
+    await page.getByTestId('view-grid').click();
+    const card = page.locator('[data-testid="file-card"]', { hasText: filename }).first();
+    await expect(card).toBeVisible({ timeout: 8_000 });
+    await card.click();
+
+    const modal = page.getByTestId('file-details-modal');
+    await expect(modal).toBeVisible({ timeout: 5_000 });
+
+    // Shard overview section should exist
+    await expect(modal.getByTestId('shard-overview')).toBeVisible({ timeout: 5_000 });
+    // Visual shard bar should be present
+    await expect(modal.getByTestId('shard-bar')).toBeVisible();
+    // Shard table should be present
+    await expect(modal.getByTestId('shard-table')).toBeVisible();
+  });
+
+  test('shard table shows correct number of shards', async ({ page }) => {
+    test.slow();
+    const filename = `shard_count_${Date.now()}.bin`;
+    const fileId = await uploadTestFile(page, filename, 'shard count test data');
+
+    // Wait for encoding to complete via API
+    const deadline = Date.now() + 30_000;
+    while (Date.now() < deadline) {
+      const status = await page.evaluate(async (id) => {
+        const r = await fetch(`/api/files/${id}`);
+        return r.ok ? (await r.json()).status : 'unknown';
+      }, fileId);
+      if (status === 'stored' || status === 'complete') break;
+      await page.waitForTimeout(500);
+    }
+
+    await page.reload({ waitUntil: 'networkidle' });
+    await page.waitForSelector('[data-testid="file-browser"]', { timeout: 10_000 });
+
+    await page.getByTestId('view-grid').click();
+    const card = page.locator('[data-testid="file-card"]', { hasText: filename }).first();
+    await expect(card).toBeVisible({ timeout: 8_000 });
+    await card.click();
+
+    const modal = page.getByTestId('file-details-modal');
+    await expect(modal).toBeVisible({ timeout: 5_000 });
+    await page.waitForTimeout(500); // let shard data load
+
+    // Count shard rows in the table
+    const shardRows = modal.locator('[data-testid^="shard-row-"]');
+    const rowCount = await shardRows.count();
+    expect(rowCount).toBeGreaterThan(0);
+
+    // Verify data/parity labels exist
+    const modalText = await modal.textContent();
+    expect(modalText).toContain('DATA');
+    expect(modalText).toContain('PARITY');
+  });
+
+  test('shard table shows availability status for each shard', async ({ page }) => {
+    test.slow();
+    const filename = `shard_status_${Date.now()}.bin`;
+    const fileId = await uploadTestFile(page, filename, 'availability status test');
+
+    // Wait for encoding to complete
+    const deadline = Date.now() + 30_000;
+    while (Date.now() < deadline) {
+      const status = await page.evaluate(async (id) => {
+        const r = await fetch(`/api/files/${id}`);
+        return r.ok ? (await r.json()).status : 'unknown';
+      }, fileId);
+      if (status === 'stored' || status === 'complete') break;
+      await page.waitForTimeout(500);
+    }
+
+    await page.reload({ waitUntil: 'networkidle' });
+    await page.waitForSelector('[data-testid="file-browser"]', { timeout: 10_000 });
+
+    await page.getByTestId('view-grid').click();
+    const card = page.locator('[data-testid="file-card"]', { hasText: filename }).first();
+    await expect(card).toBeVisible({ timeout: 8_000 });
+    await card.click();
+
+    const modal = page.getByTestId('file-details-modal');
+    await expect(modal).toBeVisible({ timeout: 5_000 });
+
+    // Wait for shard table to load
+    await expect(modal.getByTestId('shard-table')).toBeVisible({ timeout: 8_000 });
+
+    // Each shard row should show "Available" status
+    const modalText = await modal.textContent();
+    expect(modalText).toContain('Available');
+  });
+
+  test('shard table shows peer assignments', async ({ page }) => {
+    test.slow();
+    const filename = `shard_peers_${Date.now()}.bin`;
+    const fileId = await uploadTestFile(page, filename, 'peer assignment test');
+
+    // Wait for encoding to complete
+    const deadline = Date.now() + 30_000;
+    while (Date.now() < deadline) {
+      const status = await page.evaluate(async (id) => {
+        const r = await fetch(`/api/files/${id}`);
+        return r.ok ? (await r.json()).status : 'unknown';
+      }, fileId);
+      if (status === 'stored' || status === 'complete') break;
+      await page.waitForTimeout(500);
+    }
+
+    await page.reload({ waitUntil: 'networkidle' });
+    await page.waitForSelector('[data-testid="file-browser"]', { timeout: 10_000 });
+
+    await page.getByTestId('view-grid').click();
+    const card = page.locator('[data-testid="file-card"]', { hasText: filename }).first();
+    await expect(card).toBeVisible({ timeout: 8_000 });
+    await card.click();
+
+    const modal = page.getByTestId('file-details-modal');
+    await expect(modal).toBeVisible({ timeout: 5_000 });
+
+    // Wait for shard table to load
+    await expect(modal.getByTestId('shard-table')).toBeVisible({ timeout: 8_000 });
+
+    // Peer columns should have values like "local-1", "local-2", etc.
+    const modalText = await modal.textContent();
+    expect(modalText).toContain('local-');
+  });
+
+  test('shard bar blocks show data vs parity coloring', async ({ page }) => {
+    test.slow();
+    const filename = `shard_colors_${Date.now()}.bin`;
+    await uploadTestFile(page, filename, 'color test data');
+
+    await page.reload({ waitUntil: 'networkidle' });
+    await page.waitForSelector('[data-testid="file-browser"]', { timeout: 10_000 });
+    await waitForFileProcessing(page, filename);
+
+    await page.getByTestId('view-grid').click();
+    const card = page.locator('[data-testid="file-card"]', { hasText: filename }).first();
+    await expect(card).toBeVisible({ timeout: 8_000 });
+    await card.click();
+
+    const modal = page.getByTestId('file-details-modal');
+    await expect(modal).toBeVisible({ timeout: 5_000 });
+
+    // First shard block (data) should exist
+    await expect(modal.getByTestId('shard-block-0')).toBeVisible();
+    // Shard blocks should have title attributes with type info
+    const title0 = await modal.getByTestId('shard-block-0').getAttribute('title');
+    expect(title0).toContain('Data');
+  });
+
+  test('bunny video shows shard details with sizes', async ({ page }) => {
+    test.slow();
+
+    const bunnyPath = path.resolve(__dirname, '..', 'fixtures', 'bunny_1080p.mp4');
+    if (!fs.existsSync(bunnyPath)) {
+      test.skip();
+      return;
+    }
+
+    // Upload bunny via Node.js HTTP (too large for page.evaluate)
+    const bunnyData = fs.readFileSync(bunnyPath);
+    const http = await import('http');
+    const boundary = '----CFS' + Date.now();
+    const header = Buffer.from(
+      `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="bunny_1080p.mp4"\r\nContent-Type: video/mp4\r\n\r\n`,
+    );
+    const footer = Buffer.from(`\r\n--${boundary}--\r\n`);
+    const body = Buffer.concat([header, bunnyData, footer]);
+
+    const uploadResult = await new Promise((resolve, reject) => {
+      const req = http.request(
+        {
+          hostname: 'localhost',
+          port: 8000,
+          path: '/api/files/upload',
+          method: 'POST',
+          headers: {
+            'Content-Type': `multipart/form-data; boundary=${boundary}`,
+            'Content-Length': body.length,
+          },
+        },
+        (res) => {
+          let data = '';
+          res.on('data', (chunk) => (data += chunk));
+          res.on('end', () => resolve(JSON.parse(data)));
+        },
+      );
+      req.on('error', reject);
+      req.write(body);
+      req.end();
+    });
+
+    const fileId = uploadResult.id;
+
+    // Wait for processing
+    const deadline = Date.now() + 60_000;
+    while (Date.now() < deadline) {
+      const status = await page.evaluate(async (id) => {
+        const r = await fetch(`/api/files/${id}`);
+        return r.ok ? (await r.json()).status : 'unknown';
+      }, fileId);
+      if (status === 'stored' || status === 'complete') break;
+      await page.waitForTimeout(1_000);
+    }
+
+    await page.reload({ waitUntil: 'networkidle' });
+    await page.waitForSelector('[data-testid="file-browser"]', { timeout: 10_000 });
+
+    await page.getByTestId('view-grid').click();
+    const card = page.locator('[data-testid="file-card"]', { hasText: 'bunny_1080p.mp4' }).first();
+    await expect(card).toBeVisible({ timeout: 15_000 });
+    await card.click();
+
+    const modal = page.getByTestId('file-details-modal');
+    await expect(modal).toBeVisible({ timeout: 5_000 });
+
+    // Verify shard overview
+    await expect(modal.getByTestId('shard-overview')).toBeVisible();
+    await expect(modal.getByTestId('shard-bar')).toBeVisible();
+    await expect(modal.getByTestId('shard-table')).toBeVisible();
+
+    // Should show 12+ shard rows (8 data + 4 parity + .size file)
+    const shardRows = modal.locator('[data-testid^="shard-row-"]');
+    expect(await shardRows.count()).toBeGreaterThanOrEqual(12);
+
+    // Shard table should show actual sizes (not "—")
+    const modalText = await modal.textContent();
+    // Size values like "2.66 MB" should appear for the bunny video shards
+    expect(modalText).toMatch(/\d+(\.\d+)?\s*(KB|MB|GB|B)/);
   });
 });

@@ -27,7 +27,7 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from sse_starlette.sse import EventSourceResponse
 
-from api.models import FileMetadata, SystemStats, UploadResponse, StatusUpdate
+from api.models import FileMetadata, ShardInfo, SystemStats, UploadResponse, StatusUpdate
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -111,6 +111,35 @@ def _list_all_tree() -> List[Dict[str, Any]]:
         except Exception:
             continue
     return results
+
+
+def _build_shard_list(data: Dict[str, Any]) -> List[ShardInfo]:
+    """Build shard info list from stored tree metadata."""
+    chunk_list = data.get("chunk_list", [])
+    total = len(chunk_list)
+    data_shards = ENCODER_DATA_SHARDS
+    shards = []
+    for i, chunk in enumerate(chunk_list):
+        chunk_path = Path(chunk.get("path", ""))
+        size = 0
+        available = False
+        if chunk_path.exists():
+            try:
+                size = chunk_path.stat().st_size
+                available = True
+            except Exception:
+                pass
+        shard_type = "data" if i < data_shards else "parity"
+        peer = chunk.get("peer", f"local-{(i % 3) + 1}")
+        shards.append(ShardInfo(
+            num=i,
+            id=chunk.get("id", f"shard-{i}"),
+            size=size,
+            encrypted=chunk.get("encrypted", False),
+            available=available,
+            peer=peer,
+        ))
+    return shards
 
 
 def _dir_size(path: Path) -> int:
@@ -332,6 +361,7 @@ async def get_file(file_id: str) -> FileMetadata:
         created_at=data.get("created_at", ""),
         status=status,
         folder=data.get("folder"),
+        shard_list=_build_shard_list(data),
     )
 
 

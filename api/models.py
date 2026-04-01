@@ -1,6 +1,15 @@
 from pydantic import BaseModel, Field
-from typing import Optional
+from typing import List, Optional
 from datetime import datetime
+
+
+class ShardInfo(BaseModel):
+    num: int
+    id: str
+    size: int = 0
+    encrypted: bool = False
+    available: bool = True
+    peer: Optional[str] = None
 
 
 class FileMetadata(BaseModel):
@@ -11,6 +20,7 @@ class FileMetadata(BaseModel):
     created_at: str
     status: str = "stored"
     folder: Optional[str] = None
+    shard_list: Optional[List[ShardInfo]] = None
 
 
 class ChunkInfo(BaseModel):
