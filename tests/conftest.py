@@ -92,7 +92,6 @@ def sample_file_medium(tmp_path):
 
 
 @pytest.fixture
-@pytest.mark.slow
 def sample_file_large(tmp_path):
     """
     Create a 20 MB file filled with random bytes.
