@@ -60,14 +60,13 @@ export default function FileDetails({ fileId, onDelete, onClose }) {
   const IconComponent = getFileIconComponent(file.name)
   const iconColor = getIconColor(file.name)
 
-  // Build a fake chunk table for display
+  // Use real shard data from the API, or fall back to basic count
   const chunkCount = file.chunks || 0
-  const chunkRows = Array.from({ length: Math.min(chunkCount, 12) }, (_, i) => ({
-    num: i,
-    id: `shard-${i}`,
-    encrypted: true,
-    peer: `peer-${(i % 4) + 1}`,
-  }))
+  const shardList = file.shard_list || []
+  const dataShards = 8 // RS default
+  const parityShards = chunkCount - dataShards
+  const availableShards = shardList.filter(s => s.available).length
+  const totalShardSize = shardList.reduce((acc, s) => acc + (s.size || 0), 0)
 
   return (
     <div data-testid="file-details-modal" className="space-y-6">
@@ -129,40 +128,125 @@ export default function FileDetails({ fileId, onDelete, onClose }) {
         </div>
       </div>
 
-      {/* Chunk breakdown */}
-      {chunkRows.length > 0 && (
-        <div>
+      {/* Shard overview bar */}
+      {chunkCount > 0 && (
+        <div data-testid="shard-overview">
           <h4 className="text-sm font-medium text-surface-700 mb-2">
-            Shard Breakdown
+            Shard Distribution
           </h4>
+          {/* Visual shard bar */}
+          <div data-testid="shard-bar" className="flex gap-0.5 mb-3 h-6 rounded-lg overflow-hidden">
+            {shardList.length > 0 ? shardList.map((shard, i) => (
+              <div
+                key={i}
+                data-testid={`shard-block-${i}`}
+                className={clsx(
+                  'flex-1 relative group cursor-default transition-all',
+                  shard.available
+                    ? i < dataShards
+                      ? 'bg-primary-500 hover:bg-primary-400'
+                      : 'bg-amber-500 hover:bg-amber-400'
+                    : 'bg-red-400 hover:bg-red-300',
+                )}
+                title={`Shard ${i} — ${i < dataShards ? 'Data' : 'Parity'} — ${shard.available ? 'Available' : 'Missing'} — ${shard.peer}`}
+              >
+                <span className="absolute inset-0 flex items-center justify-center text-[9px] font-bold text-white/80">
+                  {i}
+                </span>
+              </div>
+            )) : Array.from({ length: chunkCount }, (_, i) => (
+              <div
+                key={i}
+                className={clsx(
+                  'flex-1',
+                  i < dataShards ? 'bg-primary-300' : 'bg-amber-300',
+                )}
+              />
+            ))}
+          </div>
+
+          {/* Legend */}
+          <div className="flex gap-4 text-xs text-surface-500 mb-3">
+            <span className="flex items-center gap-1">
+              <span className="w-2.5 h-2.5 rounded-sm bg-primary-500" /> Data ({Math.min(dataShards, chunkCount)})
+            </span>
+            {parityShards > 0 && (
+              <span className="flex items-center gap-1">
+                <span className="w-2.5 h-2.5 rounded-sm bg-amber-500" /> Parity ({parityShards})
+              </span>
+            )}
+            <span className="flex items-center gap-1">
+              <span className="w-2.5 h-2.5 rounded-sm bg-emerald-500" /> {availableShards}/{chunkCount} available
+            </span>
+          </div>
+
+          {/* Shard table */}
           <div className="border border-surface-200 rounded-lg overflow-hidden">
-            <table className="w-full text-xs">
+            <table data-testid="shard-table" className="w-full text-xs">
               <thead>
                 <tr className="bg-surface-50 border-b border-surface-200">
                   <th className="text-left px-3 py-2 font-medium text-surface-500">#</th>
-                  <th className="text-left px-3 py-2 font-medium text-surface-500">Shard ID</th>
+                  <th className="text-left px-3 py-2 font-medium text-surface-500">Type</th>
+                  <th className="text-left px-3 py-2 font-medium text-surface-500">Size</th>
+                  <th className="text-left px-3 py-2 font-medium text-surface-500">Status</th>
                   <th className="text-left px-3 py-2 font-medium text-surface-500">Encrypted</th>
                   <th className="text-left px-3 py-2 font-medium text-surface-500">Peer</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-surface-100">
-                {chunkRows.map((row) => (
-                  <tr key={row.num} className="hover:bg-surface-50">
-                    <td className="px-3 py-1.5 font-mono text-surface-400">{row.num}</td>
-                    <td className="px-3 py-1.5 font-mono text-surface-500">{row.id}</td>
+                {(shardList.length > 0 ? shardList : Array.from({ length: Math.min(chunkCount, 12) }, (_, i) => ({
+                  num: i, id: `shard-${i}`, size: 0, encrypted: false, available: true, peer: `peer-${(i % 3) + 1}`,
+                }))).slice(0, 16).map((shard) => (
+                  <tr key={shard.num} data-testid={`shard-row-${shard.num}`} className="hover:bg-surface-50">
+                    <td className="px-3 py-1.5 font-mono text-surface-400">{shard.num}</td>
                     <td className="px-3 py-1.5">
-                      <span className="text-emerald-600 font-medium">Yes</span>
+                      <span className={clsx(
+                        'inline-block px-1.5 py-0.5 rounded text-[10px] font-medium',
+                        shard.num < dataShards
+                          ? 'bg-primary-50 text-primary-700'
+                          : 'bg-amber-50 text-amber-700',
+                      )}>
+                        {shard.num < dataShards ? 'DATA' : 'PARITY'}
+                      </span>
                     </td>
-                    <td className="px-3 py-1.5 text-surface-500">{row.peer}</td>
+                    <td className="px-3 py-1.5 font-mono text-surface-500">
+                      {shard.size > 0 ? formatBytes(shard.size) : '—'}
+                    </td>
+                    <td className="px-3 py-1.5">
+                      {shard.available ? (
+                        <span className="flex items-center gap-1 text-emerald-600 font-medium">
+                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                          Available
+                        </span>
+                      ) : (
+                        <span className="flex items-center gap-1 text-red-500 font-medium">
+                          <span className="w-1.5 h-1.5 rounded-full bg-red-500" />
+                          Missing
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-3 py-1.5">
+                      <span className={shard.encrypted ? 'text-emerald-600 font-medium' : 'text-surface-400'}>
+                        {shard.encrypted ? 'Yes' : 'No'}
+                      </span>
+                    </td>
+                    <td className="px-3 py-1.5 text-surface-500">{shard.peer}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
-          {chunkCount > 12 && (
+          {chunkCount > 16 && (
             <p className="text-xs text-surface-400 mt-1.5 text-center">
-              Showing 12 of {chunkCount} shards
+              Showing 16 of {chunkCount} shards
             </p>
+          )}
+
+          {/* Total shard storage */}
+          {totalShardSize > 0 && (
+            <div className="mt-2 text-xs text-surface-400 text-center">
+              Total shard storage: {formatBytes(totalShardSize)} ({((totalShardSize / (file.size || 1)) * 100).toFixed(0)}% of original)
+            </div>
           )}
         </div>
       )}
