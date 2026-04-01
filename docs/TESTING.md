@@ -12,6 +12,12 @@ make test
 # Run evaluation tests (needs Go binaries)
 make test-eval
 
+# Run bunny video benchmarks (needs Go binaries + test fixture)
+python -m pytest tests/eval/test_bunny_benchmark.py -v -s
+
+# Run Playwright browser tests (needs running API server)
+npx playwright test tests/e2e/browser.spec.js --project=chromium
+
 # Run cluster tests (needs Docker)
 make test-cluster
 ```
@@ -27,10 +33,11 @@ tests/
 │   ├── test_pipeline.py      ← Full encode → encrypt → decrypt → decode (10 tests)
 │   ├── test_durability.py    ← Shard deletion and RS reconstruction (10 tests)
 │   ├── test_integrity.py     ← SHA-256 preservation, tamper detection (6 tests)
-│   └── test_throughput.py    ← Performance benchmarks (7 tests)
+│   ├── test_throughput.py    ← Performance benchmarks (7 tests)
+│   └── test_bunny_benchmark.py ← Bunny video: throughput, corruption threshold, parity comparison (3 tests)
 ├── e2e/                      ← Requires running API server
 │   ├── test_api.py           ← REST API CRUD operations (9 tests)
-│   └── browser.spec.js       ← Playwright browser tests
+│   └── browser.spec.js       ← Playwright browser tests (50 tests)
 ├── fuse/                     ← Requires pyfuse3
 │   └── test_fuse_ops.py      ← FUSE filesystem operations (8 tests)
 └── cluster/                  ← Requires Docker Compose
@@ -63,6 +70,36 @@ python -m pytest tests/eval/ -v
 
 If the binaries aren't built, these tests skip automatically.
 
+### Bunny video benchmarks
+
+These use a 1 MB Big Buck Bunny 1080p video clip to measure real-world
+pipeline performance and find the exact corruption threshold.
+
+```bash
+# Download the test fixture (1 MB clip)
+mkdir -p tests/fixtures
+curl -L -o tests/fixtures/bunny_1080p.mp4 \
+  'https://test-videos.co.uk/vids/bigbuckbunny/mp4/h264/1080/Big_Buck_Bunny_1080_10s_1MB.mp4'
+
+# Build binaries if not already built
+make build
+
+# Run benchmarks (use -s to see the output tables)
+python -m pytest tests/eval/test_bunny_benchmark.py -v -s
+```
+
+The benchmark produces three reports:
+
+1. **Pipeline throughput** — encode + encrypt + decrypt + decode timing with
+   MB/s rates and SHA-256 verification
+2. **Corruption threshold** — progressively deletes 0–12 shards and reports
+   INTACT / CORRUPTED / UNRECOVERABLE for each count, finding the exact point
+   where data loss begins
+3. **Parity comparison** — compares RS configs (4+2, 8+4, 6+6, 4+8) showing
+   max shard loss, fault tolerance %, storage overhead %, and encode time
+
+If the bunny video isn't present, these tests skip automatically.
+
 ### E2E API tests
 
 These need a running API server. Uploads are processed asynchronously, so the
@@ -75,6 +112,44 @@ python -m uvicorn api.main:app --port 8000
 # In another terminal, run the tests:
 python -m pytest tests/e2e/test_api.py -v -m api
 ```
+
+### Playwright browser tests
+
+These test the full React UI against a live API server: file upload, download,
+drag-and-drop, search, settings, real-time WebSocket updates, and download
+integrity with SHA-256 hash verification (including the bunny video).
+
+```bash
+# Install Playwright (one-time setup)
+npm install @playwright/test
+npx playwright install chromium
+
+# Option 1: Playwright starts the server automatically (uses playwright.config.js)
+npx playwright test tests/e2e/browser.spec.js --project=chromium
+
+# Option 2: Start server manually, then run tests
+python -m uvicorn api.main:app --port 8000
+npx playwright test tests/e2e/browser.spec.js --project=chromium
+```
+
+The test suite covers 9 areas (50 tests total):
+
+| Suite | Tests | What it covers |
+|-------|-------|----------------|
+| Layout and Navigation | 5 | Sidebar, top bar, search, view toggle |
+| File Upload | 8 | Button picker, drag-and-drop, processing status, toast |
+| File Browser | 8 | Search filter, grid/list views, modal, sorting |
+| File Operations | 5 | Download button, delete confirm/cancel, modal download |
+| Drag and Drop | 5 | Highlight, drop upload, multi-file, outside-zone |
+| Settings Panel | 5 | Erasure sliders, S3 config, local sync, URL import |
+| Real-time Updates | 3 | WebSocket status, file count, live push |
+| Service Integrations | 4 | S3 form validation, URL import, sync button |
+| Download Integrity | 3 | Binary hash match, UI button download, bunny video SHA-256 |
+
+The **Download Integrity** suite is the most important: it uploads a file,
+downloads it back through the full RS decode pipeline, and verifies the SHA-256
+hash matches the original byte-for-byte. The bunny video test does this with
+the 1 MB video file.
 
 ### Cluster tests
 
@@ -100,6 +175,54 @@ python -m pytest tests/fuse/ -v
 ```
 
 ## Key test scenarios
+
+### Bunny video benchmarks
+
+`tests/eval/test_bunny_benchmark.py` runs three benchmarks against the 1 MB
+Big Buck Bunny video clip:
+
+**Pipeline throughput** (typical results on a standard machine):
+
+| Stage | Throughput |
+|-------|-----------|
+| Encode (RS 8+4) | ~3 MB/s |
+| Encrypt (Fernet AES) | ~20 MB/s |
+| Decrypt (Fernet AES) | ~190 MB/s |
+| Decode (RS 8+4) | ~4 MB/s |
+| **Full pipeline** | **~1.7 MB/s** |
+
+**Corruption threshold** with RS(8,4) — 8 data + 4 parity = 12 total shards:
+
+| Shards deleted | Result |
+|---------------|--------|
+| 0–4 | INTACT (SHA-256 matches original) |
+| 5+ | UNRECOVERABLE (decoder fails cleanly) |
+
+There is **no silent corruption** — the decoder either produces exact bytes or
+fails outright. Fault tolerance = 33% of shards can be lost.
+
+**Parity comparison** across configurations:
+
+| Config | Max shard loss | Fault tolerance | Storage overhead |
+|--------|---------------|----------------|-----------------|
+| 4+2 | 2 | 33% | 50% |
+| 8+4 | 4 | 33% | 50% |
+| 6+6 | 6 | 50% | 100% |
+| 4+8 | 8 | 67% | 200% |
+
+### Download integrity
+
+`tests/e2e/browser.spec.js` (Suite 9: Download Integrity) verifies that the
+full upload → encode → store → decode → download pipeline preserves files
+byte-for-byte:
+
+1. Uploads a file (binary content or the bunny video)
+2. Waits for RS encoding to complete
+3. Downloads via the API (`GET /api/files/:id/download`)
+4. Computes SHA-256 hash of the downloaded content in the browser
+5. Asserts the hash matches the original exactly
+
+This catches padding bugs, shard naming mismatches, and decoder path issues.
 
 ### Durability: shard deletion
 
