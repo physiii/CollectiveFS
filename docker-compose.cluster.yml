@@ -6,7 +6,6 @@ services:
       - "8001:8000"
     volumes:
       - cfs_node1_data:/data/.collective
-      - ./lib:/app/lib:ro
     environment:
       - NODE_ID=node1
       - COLLECTIVE_PATH=/data/.collective
@@ -31,7 +30,6 @@ services:
       - "8002:8000"
     volumes:
       - cfs_node2_data:/data/.collective
-      - ./lib:/app/lib:ro
     environment:
       - NODE_ID=node2
       - COLLECTIVE_PATH=/data/.collective
@@ -56,7 +54,6 @@ services:
       - "8003:8000"
     volumes:
       - cfs_node3_data:/data/.collective
-      - ./lib:/app/lib:ro
     environment:
       - NODE_ID=node3
       - COLLECTIVE_PATH=/data/.collective
