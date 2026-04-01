@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   collectivefs:
     build: .
@@ -7,7 +5,6 @@ services:
       - "8000:8000"
     volumes:
       - collective_data:/data/.collective
-      - ./lib:/app/lib:ro
     environment:
       - COLLECTIVE_PATH=/data/.collective
       - ENCODER_PATH=/app/lib/encoder
