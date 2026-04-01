@@ -464,7 +464,7 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent | ImageConte
         return await _text(
             f"Cannot connect to CollectiveFS at {BASE_URL}.\n"
             "Make sure the service is running:\n"
-            "  docker compose up -d   (from /home/andy/code/CollectiveFS/)"
+            "  docker compose up -d   (from the CollectiveFS project root)"
         )
     except httpx.HTTPStatusError as e:
         return await _text(f"API error {e.response.status_code}: {e.response.text}")

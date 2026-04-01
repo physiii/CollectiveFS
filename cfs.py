@@ -24,7 +24,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 import simplejson
 import random
 
-ConfigDir = "/home/andy/.collective/"
+ConfigDir = os.path.expanduser("~/.collective/")
 ConfigFile = ConfigDir + "config"
 KeyFile = ConfigDir + "key"
 

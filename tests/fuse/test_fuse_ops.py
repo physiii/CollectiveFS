@@ -31,7 +31,7 @@ import pytest
 
 try:
     import sys
-    sys.path.insert(0, "/home/andy/code/CollectiveFS")
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
     import cfs_fuse  # noqa: F401
     from cfs_fuse import CFSFilesystem
     FUSE_AVAILABLE = True
@@ -67,8 +67,8 @@ def fuse_fs(collective_dir):
     """
     return CFSFilesystem(
         collective_path=str(collective_dir),
-        encoder_path="/home/andy/code/CollectiveFS/lib/encoder",
-        decoder_path="/home/andy/code/CollectiveFS/lib/decoder",
+        encoder_path=os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "lib", "encoder"),
+        decoder_path=os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "lib", "decoder"),
     )
 
 

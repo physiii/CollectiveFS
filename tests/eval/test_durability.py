@@ -24,8 +24,9 @@ import pytest
 
 from cryptography.fernet import Fernet
 
-ENCODER_BIN = "/home/andy/code/CollectiveFS/lib/encoder"
-DECODER_BIN = "/home/andy/code/CollectiveFS/lib/decoder"
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+ENCODER_BIN = os.path.join(PROJECT_ROOT, "lib", "encoder")
+DECODER_BIN = os.path.join(PROJECT_ROOT, "lib", "decoder")
 
 BINARIES_PRESENT = (
     os.path.isfile(ENCODER_BIN) and os.access(ENCODER_BIN, os.X_OK) and

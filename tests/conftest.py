@@ -14,7 +14,7 @@ import pytest
 
 from cryptography.fernet import Fernet
 
-PROJECT_ROOT = "/home/andy/code/CollectiveFS"
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ENCODER_BIN = os.path.join(PROJECT_ROOT, "lib", "encoder")
 DECODER_BIN = os.path.join(PROJECT_ROOT, "lib", "decoder")
 
