@@ -18,7 +18,8 @@ With 8 data + 4 parity shards, you can lose up to 4 shards and still recover the
 CollectiveFS/
 ├── api/                    ← FastAPI REST backend (the main service)
 │   ├── main.py             ← All endpoints, background pipeline, peer discovery
-│   └── models.py           ← Pydantic models (FileMetadata, UploadResponse, etc.)
+│   ├── models.py           ← Pydantic models (FileMetadata, contracts, QoS, etc.)
+│   └── contracts.py        ← Peer contract engine (challenges, QoS, enforcement)
 ├── lib/                    ← Go encoder/decoder binaries
 │   ├── cmd/encoder/        ← Encoder source (splits file + computes parity)
 │   ├── cmd/decoder/        ← Decoder source (reconstructs from shards)
@@ -68,6 +69,8 @@ CollectiveFS/
 │       ├── ...
 │       └── file.bin.11  (parity shard)
 ├── cache/           ← Reconstructed files (temporary)
+├── contracts/       ← Peer contract JSONs
+│   └── <contract_id>.json
 └── public/          ← Reserved for future use
 ```
 
@@ -112,6 +115,54 @@ With 3 nodes each holding ~4 shards, losing 1 node = losing ~4 shards = exactly 
 - **Granularity**: Each shard encrypted independently with a random IV
 - **Tamper detection**: HMAC-SHA256 verification on decrypt; corrupted shards raise `InvalidToken`
 
+## Peer contracts
+
+Peers enter bilateral **contracts** that govern storage obligations, challenge frequency, and eviction rules. Each contract specifies a tier:
+
+| Tier | Challenge Interval | Response Deadline | Storage Multiplier | Max Violations |
+|------|-------------------|-------------------|-------------------|---------------|
+| **HOT** | 30 s | 1 second | 2.0x | 3 |
+| **WARM** | 5 min | 60 seconds | 1.0x | 5 |
+| **COLD** | 1 hour | 1 hour | 0.5x | 10 |
+
+### Proof-of-storage challenges
+
+Challenges verify that a peer actually holds the shard it claims to store:
+
+1. Challenger picks N random byte offsets in the shard
+2. Sends `{shard_id, offsets, window_size, nonce}` to peer
+3. Peer reads bytes at those positions, returns `HMAC-SHA256(nonce, bytes)`
+4. Challenger verifies against its own local copy
+
+A nonce prevents replay attacks; random offsets prevent pre-computation.
+
+### QoS scoring
+
+Each contract tracks a composite score (0.0 – 1.0):
+
+| Component | Weight | Measures |
+|-----------|--------|----------|
+| Challenge pass rate | 40% | How often proofs verify correctly |
+| Availability | 25% | Uptime ping success rate |
+| Latency | 20% | Response time vs. tier deadline |
+| Storage ratio | 15% | Contributed vs. consumed per tier multiplier |
+
+### Enforcement state machine
+
+```
+ACTIVE ──low score──→ PROBATION ──recovers──→ ACTIVE
+                          │
+                    low score / max violations
+                          ↓
+                      SUSPENDED ──recovers──→ PROBATION
+                          │
+                      still bad
+                          ↓
+                       EVICTED (terminal → drop their shards)
+```
+
+When a peer is **evicted**, all shards held for that peer are deleted (reciprocal eviction). If they drop your chunks, their challenges fail, their score tanks, and their shards get dropped in return.
+
 ## API endpoints
 
 | Endpoint | Method | Purpose |
@@ -128,5 +179,15 @@ With 3 nodes each holding ~4 shards, losing 1 node = losing ~4 shards = exactly 
 | `/api/peers/files` | GET | This node's files (for peer sync) |
 | `/api/peers/chunks/<id>` | GET | Serve a single shard |
 | `/api/network` | GET | Aggregate view (local + peer files) |
+| `/api/contracts/tiers` | GET | List tier configurations |
+| `/api/contracts` | GET/POST | List or create peer contracts |
+| `/api/contracts/<id>` | GET/DELETE | Get or remove a contract |
+| `/api/contracts/<id>/tier` | PATCH | Change contract tier |
+| `/api/contracts/<id>/evict` | POST | Manually evict a peer |
+| `/api/contracts/<id>/shards/theirs` | POST | Register shard a peer holds for us |
+| `/api/contracts/<id>/shards/ours` | POST | Register shard we hold for a peer |
+| `/api/contracts/<id>/challenge` | POST | Issue proof-of-storage challenge |
+| `/api/contracts/challenge/respond` | POST | Respond to incoming challenge |
+| `/api/contracts/health/summary` | GET | Network-wide contract health |
 | `/api/status/stream` | GET | SSE status stream |
 | `/ws` | WS | WebSocket status stream |

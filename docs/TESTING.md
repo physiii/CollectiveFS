@@ -28,7 +28,8 @@ make test-cluster
 tests/
 ├── unit/                     ← Fast, no dependencies beyond Python
 │   ├── test_crypto.py        ← Fernet encryption/decryption (20 tests)
-│   └── test_metadata.py      ← File/chunk metadata schemas (7 tests)
+│   ├── test_metadata.py      ← File/chunk metadata schemas (7 tests)
+│   └── test_contracts.py     ← Peer contract system (75 tests)
 ├── eval/                     ← Requires lib/encoder + lib/decoder binaries
 │   ├── test_pipeline.py      ← Full encode → encrypt → decrypt → decode (10 tests)
 │   ├── test_durability.py    ← Shard deletion and RS reconstruction (10 tests)
@@ -50,11 +51,13 @@ tests/
 
 ### Unit tests
 
-No setup needed. These test cryptography and metadata logic in pure Python.
+No setup needed. These test cryptography, metadata, and peer contracts in pure Python.
 
 ```bash
 python -m pytest tests/unit/ -v
 ```
+
+Contract tests cover: tier configuration, proof-of-storage challenge generation/verification, QoS scoring, storage accounting, enforcement state machine (active → probation → suspended → evicted), reciprocal eviction, and full lifecycle simulations.
 
 ### Evaluation tests
 

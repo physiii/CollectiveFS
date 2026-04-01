@@ -57,20 +57,17 @@ export async function deleteFile(id) {
 }
 
 /**
- * GET /api/files/:id/download – returns a Blob
+ * GET /api/files/:id/download – triggers a native browser download.
+ * Uses a direct link instead of axios to avoid timeout and memory issues
+ * with large files.
  * @param {string} id
  * @param {string} filename
  */
 export async function downloadFile(id, filename) {
-  const { data } = await api.get(`/files/${id}/download`, {
-    responseType: 'blob',
-  })
-  const url = window.URL.createObjectURL(data)
   const a = document.createElement('a')
-  a.href = url
+  a.href = `/api/files/${id}/download`
   a.download = filename || 'download'
   a.click()
-  window.URL.revokeObjectURL(url)
 }
 
 /** GET /api/stats */

@@ -4,7 +4,7 @@
 
 | Test Tier | Command | Tests | Time | Docker? |
 |-----------|---------|-------|------|---------|
-| **Unit** | `make test-unit` | 27 pass | ~0.1s | No |
+| **Unit** | `make test-unit` | 102 pass | ~3.5s | No |
 | **Eval** | `make test-eval` | 33 pass, 3 skip | ~2s | No |
 | **Benchmarks** | `python benchmarks/run_all.py` | Full suite | ~45s | No |
 | **e2e API** | `pytest tests/e2e/test_api.py -v` | 9 pass | ~0.5s | Yes |

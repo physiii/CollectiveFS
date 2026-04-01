@@ -27,7 +27,22 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from sse_starlette.sse import EventSourceResponse
 
-from api.models import FileMetadata, ShardInfo, SystemStats, UploadResponse, StatusUpdate
+from api.models import (
+    ChallengeRequest,
+    ChallengeResponse,
+    ContractCreateRequest,
+    ContractStatus,
+    ContractSummary,
+    ContractTier,
+    FileMetadata,
+    PeerContract,
+    ShardInfo,
+    StatusUpdate,
+    SystemStats,
+    TierConfig,
+    UploadResponse,
+)
+from api.contracts import ContractManager, TIER_CONFIGS, respond_to_challenge
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -64,6 +79,9 @@ _peers: Dict[str, Dict[str, Any]] = {}
 # Pre-parse peer URLs from env at startup
 for _purl in [u.strip() for u in _PEER_URLS_RAW.split(",") if u.strip()]:
     _peers[_purl] = {"url": _purl, "node_id": None, "last_seen": None, "healthy": False}
+
+# Contract manager
+contract_mgr = ContractManager(COLLECTIVE_PATH, NODE_ID)
 
 # ---------------------------------------------------------------------------
 # App
@@ -688,6 +706,183 @@ async def _startup_announce():
                     _peers[peer_url]["node_id"] = resp.get("node_id")
         except Exception:
             _peers[peer_url]["healthy"] = False
+
+
+# ---------------------------------------------------------------------------
+# Contract routes
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/contracts/tiers", response_model=List[TierConfig])
+async def list_tiers() -> List[TierConfig]:
+    """Return the configuration for every contract tier."""
+    return list(TIER_CONFIGS.values())
+
+
+@app.post("/api/contracts", response_model=PeerContract)
+async def create_contract(body: ContractCreateRequest) -> PeerContract:
+    """Establish a new peer contract."""
+    return contract_mgr.create_contract(body.peer_url, body.peer_node_id, body.tier)
+
+
+@app.get("/api/contracts", response_model=List[ContractSummary])
+async def list_contracts(
+    status: Optional[str] = None,
+) -> List[ContractSummary]:
+    """List all contracts with optional status filter."""
+    if status:
+        try:
+            cs = ContractStatus(status)
+        except ValueError:
+            raise HTTPException(400, f"Invalid status: {status}")
+        return [
+            s
+            for s in contract_mgr.list_summaries()
+            if s.status == cs
+        ]
+    return contract_mgr.list_summaries()
+
+
+@app.get("/api/contracts/{contract_id}", response_model=PeerContract)
+async def get_contract(contract_id: str) -> PeerContract:
+    """Get full contract details including QoS and recent challenges."""
+    c = contract_mgr.get_contract(contract_id)
+    if c is None:
+        raise HTTPException(404, "Contract not found")
+    return c
+
+
+@app.patch("/api/contracts/{contract_id}/tier")
+async def change_tier(contract_id: str, body: Dict[str, Any]) -> PeerContract:
+    """Change a contract's tier (hot/warm/cold)."""
+    tier_str = body.get("tier", "")
+    try:
+        tier = ContractTier(tier_str)
+    except ValueError:
+        raise HTTPException(400, f"Invalid tier: {tier_str}")
+    c = contract_mgr.update_tier(contract_id, tier)
+    if c is None:
+        raise HTTPException(404, "Contract not found")
+    return c
+
+
+@app.post("/api/contracts/{contract_id}/evict")
+async def evict_peer(contract_id: str) -> Dict[str, Any]:
+    """Manually evict a peer and trigger reciprocal shard drop."""
+    c = contract_mgr.evict_contract(contract_id)
+    if c is None:
+        raise HTTPException(404, "Contract not found")
+    dropped = contract_mgr.execute_reciprocal_eviction(contract_id, PROC_DIR)
+    return {"evicted": True, "shards_dropped": dropped}
+
+
+@app.delete("/api/contracts/{contract_id}")
+async def delete_contract(contract_id: str) -> Dict[str, bool]:
+    """Remove a contract entirely."""
+    if not contract_mgr.remove_contract(contract_id):
+        raise HTTPException(404, "Contract not found")
+    return {"deleted": True}
+
+
+@app.post("/api/contracts/{contract_id}/shards/theirs")
+async def register_shard_they_hold(
+    contract_id: str, body: Dict[str, Any]
+) -> Dict[str, bool]:
+    """Register that a peer is holding a shard for us."""
+    shard_id = body.get("shard_id", "")
+    size_bytes = body.get("size_bytes", 0)
+    if not shard_id:
+        raise HTTPException(400, "shard_id required")
+    contract_mgr.register_shard_held_for_us(contract_id, shard_id, size_bytes)
+    return {"registered": True}
+
+
+@app.post("/api/contracts/{contract_id}/shards/ours")
+async def register_shard_we_hold(
+    contract_id: str, body: Dict[str, Any]
+) -> Dict[str, bool]:
+    """Register that we are holding a shard for a peer."""
+    shard_id = body.get("shard_id", "")
+    size_bytes = body.get("size_bytes", 0)
+    if not shard_id:
+        raise HTTPException(400, "shard_id required")
+    contract_mgr.register_shard_we_hold(contract_id, shard_id, size_bytes)
+    return {"registered": True}
+
+
+@app.post("/api/contracts/{contract_id}/challenge")
+async def issue_challenge(contract_id: str, body: Dict[str, Any]) -> Dict[str, Any]:
+    """Issue a proof-of-storage challenge to a peer.
+
+    Requires shard_id and shard_path (local path to our copy of the shard,
+    used to generate the expected answer).
+    """
+    shard_id = body.get("shard_id", "")
+    shard_path_str = body.get("shard_path", "")
+    if not shard_id or not shard_path_str:
+        raise HTTPException(400, "shard_id and shard_path required")
+    shard_path = Path(shard_path_str)
+    if not shard_path.exists():
+        raise HTTPException(400, "Local shard copy not found")
+    record = contract_mgr.issue_challenge(contract_id, shard_id, shard_path)
+    if record is None:
+        raise HTTPException(422, "Could not generate challenge")
+    return record.model_dump()
+
+
+@app.post("/api/contracts/challenge/respond", response_model=ChallengeResponse)
+async def respond_challenge(body: ChallengeRequest) -> ChallengeResponse:
+    """Respond to an incoming proof-of-storage challenge from a peer.
+
+    Reads the requested byte positions from our local copy of the shard
+    and returns the HMAC proof.
+    """
+    resp = contract_mgr.handle_incoming_challenge(body, TREE_DIR)
+    if resp is None:
+        raise HTTPException(404, "Shard not found locally")
+    return resp
+
+
+@app.post("/api/contracts/{contract_id}/challenge/{challenge_id}/resolve")
+async def resolve_challenge_endpoint(
+    contract_id: str, challenge_id: str, body: Dict[str, Any]
+) -> Dict[str, Any]:
+    """Resolve a pending challenge with a peer's proof."""
+    proof = body.get("proof")
+    response_ms = body.get("response_ms")
+    timed_out = body.get("timed_out", False)
+    contract = contract_mgr.resolve_challenge(
+        challenge_id, proof, response_ms, timed_out
+    )
+    if contract is None:
+        raise HTTPException(404, "Challenge or contract not found")
+    return {
+        "passed": not timed_out and proof is not None,
+        "status": contract.status.value,
+        "qos_score": contract.qos.score,
+        "violations": contract.violations,
+    }
+
+
+@app.get("/api/contracts/health/summary")
+async def contracts_health() -> Dict[str, Any]:
+    """Network-wide contract health dashboard."""
+    return contract_mgr.get_network_health()
+
+
+# ---------------------------------------------------------------------------
+# Start contract enforcement loop on startup
+# ---------------------------------------------------------------------------
+
+
+@app.on_event("startup")
+async def _start_contract_enforcement():
+    await contract_mgr.start()
+
+
+@app.on_event("shutdown")
+async def _stop_contract_enforcement():
+    await contract_mgr.stop()
 
 
 # ---------------------------------------------------------------------------

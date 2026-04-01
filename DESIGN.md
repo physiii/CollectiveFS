@@ -542,7 +542,8 @@ PyInstaller bundles the Python interpreter, all dependencies, and `cfs.py` into 
 | File retrieval | High | Decode path (`lib/decoder`) and fetch-from-peer flow not implemented |
 | Reed-Solomon decoding | High | `lib/decoder` binary exists but retrieval pipeline is not wired up |
 | Fernet decryption on retrieval | High | `decryptChunk()` function exists but is not called in a retrieval flow |
-| Storage accounting | Medium | No mechanism to track how much space a node has contributed vs. consumed |
+| ~~Storage accounting~~ | ~~Medium~~ | **Implemented.** Peer contracts track contributed vs. consumed bytes per peer, with tiered QoS enforcement (HOT/WARM/COLD). |
+| ~~Proof-of-storage challenges~~ | ~~Medium~~ | **Implemented.** Random byte-offset HMAC challenges verify peers hold the shards they claim. |
 | Peer authentication | Medium | Nodes cannot verify the identity of peers they connect to |
 | Key backup / recovery | Medium | Losing `~/.collective/key` makes all stored data unrecoverable |
 | ConfigDir portability | Low | `ConfigDir` is hardcoded to `/home/andy/.collective/` in source |
@@ -560,10 +561,10 @@ PyInstaller bundles the Python interpreter, all dependencies, and `cfs.py` into 
 - Replace the local TCP signaling socket with the network signaling server.
 - Define and implement the node announcement and chunk-placement protocol.
 
-**Phase 3 — Peer Discovery and Storage Accounting**
+**Phase 3 — Peer Discovery and Storage Accounting** *(storage accounting complete)*
 - Implement peer discovery (bootstrap nodes + gossip).
-- Track storage contributed vs. consumed per node to enforce the reciprocal barter model.
-- Add basic proof-of-storage challenges to detect peers who discard chunks after acknowledging storage.
+- ~~Track storage contributed vs. consumed per node to enforce the reciprocal barter model.~~ **Done.** Peer contracts track per-peer storage ledger with tiered SLAs (HOT/WARM/COLD).
+- ~~Add basic proof-of-storage challenges to detect peers who discard chunks after acknowledging storage.~~ **Done.** Random byte-offset HMAC challenges with QoS scoring and enforcement state machine (active → probation → suspended → evicted). Reciprocal eviction drops shards for evicted peers.
 
 **Phase 4 — Hardening**
 - Add TLS to the signaling channel.
