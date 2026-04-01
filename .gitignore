@@ -1,0 +1,25 @@
+# Build artifacts
+build/
+dist/
+*.spec
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+
+# Compiled binaries
+*.so
+*.o
+*.a
+
+# Vendored dependencies (install via pip/go mod instead)
+cryptography/
+
+# Test artifacts
+test.mk4
+
+# OS
+.DS_Store
+Thumbs.db
