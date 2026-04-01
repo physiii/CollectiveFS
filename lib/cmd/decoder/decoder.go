@@ -14,6 +14,8 @@ import (
 	"fmt"
 	"io/ioutil"
 	"os"
+	"strconv"
+	"strings"
 
 	"github.com/klauspost/reedsolomon"
 )
@@ -78,11 +80,24 @@ func main() {
 		outfn = fname
 	}
 
+	// Determine output size: use original file size if .size file exists,
+	// otherwise fall back to shardSize * dataShards (may include padding)
+	outputSize := len(shards[0]) * *dataShards
+	sizefn := fmt.Sprintf("%s.size", fname)
+	sizeData, sizeErr := ioutil.ReadFile(sizefn)
+	if sizeErr == nil {
+		n, convErr := strconv.Atoi(strings.TrimSpace(string(sizeData)))
+		if convErr == nil && n > 0 && n <= outputSize {
+			outputSize = n
+			fmt.Printf("Using original file size: %d bytes\n", outputSize)
+		}
+	}
+
 	fmt.Println("Writing data to", outfn)
 	f, err := os.Create(outfn)
 	checkErr(err)
 
-	err = enc.Join(f, shards, len(shards[0])**dataShards)
+	err = enc.Join(f, shards, outputSize)
 	checkErr(err)
 }
 

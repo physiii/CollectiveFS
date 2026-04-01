@@ -33,8 +33,8 @@ from api.models import FileMetadata, SystemStats, UploadResponse, StatusUpdate
 # Configuration
 # ---------------------------------------------------------------------------
 COLLECTIVE_PATH = Path(os.environ.get("COLLECTIVE_PATH", Path.home() / ".collective"))
-ENCODER_PATH = Path(os.environ.get("ENCODER_PATH", "./lib/encoder"))
-DECODER_PATH = Path(os.environ.get("DECODER_PATH", "./lib/decoder"))
+ENCODER_PATH = Path(os.environ.get("ENCODER_PATH", "./lib/encoder")).resolve()
+DECODER_PATH = Path(os.environ.get("DECODER_PATH", "./lib/decoder")).resolve()
 PORT = int(os.environ.get("PORT", 8000))
 NODE_ID = os.environ.get("NODE_ID", str(uuid.uuid4()))
 # Comma-separated list of peer base URLs e.g. "http://node2:8000,http://node3:8000"
@@ -413,23 +413,39 @@ async def download_file(file_id: str) -> StreamingResponse:
 
     # Try decoder binary first
     if DECODER_PATH.exists() and os.access(str(DECODER_PATH), os.X_OK):
-        out_dir = str(CACHE_DIR / file_id)
-        os.makedirs(out_dir, exist_ok=True)
-        shard_dir = str(PROC_DIR / file_id)
-        result = subprocess.run(
-            [str(DECODER_PATH), shard_dir, out_dir, file_name],
-            capture_output=True,
-            timeout=300,
-        )
-        out_file = Path(out_dir) / file_name
-        if result.returncode == 0 and out_file.exists():
-            return StreamingResponse(
-                open(str(out_file), "rb"),
-                media_type="application/octet-stream",
-                headers={
-                    "Content-Disposition": f'attachment; filename="{file_name}"'
-                },
-            )
+        shard_dir = PROC_DIR / file_id
+        if shard_dir.exists():
+            # Discover the actual shard base name from .0 shard file
+            shard_base = None
+            for f in shard_dir.iterdir():
+                if f.name.endswith(".0"):
+                    shard_base = f.name[:-2]  # strip ".0"
+                    break
+            if shard_base:
+                out_file = CACHE_DIR / file_id / file_name
+                out_file.parent.mkdir(parents=True, exist_ok=True)
+                result = subprocess.run(
+                    [
+                        str(DECODER_PATH),
+                        "-data", str(ENCODER_DATA_SHARDS),
+                        "-par", str(ENCODER_PAR_SHARDS),
+                        "-out", str(out_file),
+                        shard_base,
+                    ],
+                    cwd=str(shard_dir),
+                    capture_output=True,
+                    timeout=300,
+                )
+                if result.returncode == 0 and out_file.exists():
+                    file_size = out_file.stat().st_size
+                    return StreamingResponse(
+                        open(str(out_file), "rb"),
+                        media_type="application/octet-stream",
+                        headers={
+                            "Content-Disposition": f'attachment; filename="{file_name}"',
+                            "Content-Length": str(file_size),
+                        },
+                    )
 
     # Fallback: decrypt and stream the first shard
     if chunk_list:

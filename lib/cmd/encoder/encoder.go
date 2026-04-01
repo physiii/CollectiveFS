@@ -100,6 +100,13 @@ func main() {
 		err = ioutil.WriteFile(filepath.Join(dir, outfn), shard, 0644)
 		checkErr(err)
 	}
+
+	// Write original file size so decoder can truncate padding
+	sizefn := fmt.Sprintf("%s.size", file)
+	sizeData := fmt.Sprintf("%d", len(b))
+	fmt.Println("Writing size file", sizefn)
+	err = ioutil.WriteFile(filepath.Join(dir, sizefn), []byte(sizeData), 0644)
+	checkErr(err)
 }
 
 func checkErr(err error) {

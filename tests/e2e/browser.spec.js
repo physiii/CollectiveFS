@@ -12,6 +12,7 @@ import { test, expect } from '@playwright/test';
 import path from 'path';
 import fs from 'fs';
 import os from 'os';
+import crypto from 'crypto';
 
 // ---------------------------------------------------------------------------
 // Helper utilities
@@ -991,5 +992,174 @@ test.describe('Service Integrations', () => {
     } else {
       await expect(page.getByTestId('settings-panel')).toBeVisible();
     }
+  });
+});
+
+// ===========================================================================
+// Suite 9 – Download Integrity (file comes back complete)
+// ===========================================================================
+
+test.describe('Download Integrity', () => {
+  test('download returns complete file matching original content', async ({ page }) => {
+    test.slow();
+    const filename = `integrity_${Date.now()}.bin`;
+    // Create known binary content (256 bytes of deterministic data)
+    const content = Buffer.alloc(256);
+    for (let i = 0; i < 256; i++) content[i] = i;
+    const originalHash = crypto.createHash('sha256').update(content).digest('hex');
+
+    // Upload via API
+    const fileId = await page.evaluate(
+      async ({ fname, bytes }) => {
+        const arr = new Uint8Array(bytes);
+        const blob = new Blob([arr], { type: 'application/octet-stream' });
+        const formData = new FormData();
+        formData.append('file', blob, fname);
+        const resp = await fetch('/api/files/upload', {
+          method: 'POST',
+          body: formData,
+        });
+        const json = await resp.json();
+        return json.id;
+      },
+      { fname: filename, bytes: Array.from(content) },
+    );
+
+    // Wait for processing to complete
+    const deadline = Date.now() + 30_000;
+    while (Date.now() < deadline) {
+      const status = await page.evaluate(async (id) => {
+        const r = await fetch(`/api/files/${id}`);
+        if (!r.ok) return 'unknown';
+        const d = await r.json();
+        return d.status;
+      }, fileId);
+      if (status === 'stored' || status === 'complete') break;
+      await page.waitForTimeout(500);
+    }
+
+    // Download via API and verify content hash
+    const downloadHash = await page.evaluate(async (id) => {
+      const resp = await fetch(`/api/files/${id}/download`);
+      if (!resp.ok) return `error:${resp.status}`;
+      const buf = await resp.arrayBuffer();
+      // Compute SHA-256 using Web Crypto API (window.crypto to avoid Node.js capture)
+      const hashBuf = await window.crypto.subtle.digest('SHA-256', buf);
+      const hashArr = Array.from(new Uint8Array(hashBuf));
+      return hashArr.map((b) => b.toString(16).padStart(2, '0')).join('');
+    }, fileId);
+
+    expect(downloadHash).toBe(originalHash);
+  });
+
+  test('download via UI button produces complete file', async ({ page }) => {
+    test.slow();
+    const filename = `ui_dl_${Date.now()}.txt`;
+    const content = 'CollectiveFS download integrity verification payload ' + Date.now();
+    const fileId = await uploadTestFile(page, filename, content);
+
+    // Wait for processing
+    const deadline = Date.now() + 30_000;
+    while (Date.now() < deadline) {
+      const status = await page.evaluate(async (id) => {
+        const r = await fetch(`/api/files/${id}`);
+        if (!r.ok) return 'unknown';
+        return (await r.json()).status;
+      }, fileId);
+      if (status === 'stored' || status === 'complete') break;
+      await page.waitForTimeout(500);
+    }
+
+    // Verify download content via API fetch (the UI uses createObjectURL
+    // which doesn't always trigger Playwright's download event)
+    const downloadedContent = await page.evaluate(async (id) => {
+      const resp = await fetch(`/api/files/${id}/download`);
+      if (!resp.ok) return `error:${resp.status}`;
+      return await resp.text();
+    }, fileId);
+
+    expect(downloadedContent).toBe(content);
+
+    // Also verify the UI download button is clickable without crash
+    await page.reload({ waitUntil: 'networkidle' });
+    await page.waitForSelector('[data-testid="file-browser"]', { timeout: 10_000 });
+    await waitForFileProcessing(page, filename);
+    await page.getByTestId('view-grid').click();
+
+    const card = page.locator('[data-testid="file-card"]', { hasText: filename }).first();
+    await expect(card).toBeVisible({ timeout: 8_000 });
+    await card.locator('[data-testid="download-button"]').click();
+    // Page should not crash
+    await expect(page.getByTestId('file-browser')).toBeVisible();
+  });
+
+  test('upload and download bunny video with hash verification', async ({ page }) => {
+    test.slow();
+
+    // Check if bunny video exists
+    const bunnyPath = path.resolve(__dirname, '..', 'fixtures', 'bunny_1080p.mp4');
+    if (!fs.existsSync(bunnyPath)) {
+      test.skip();
+      return;
+    }
+
+    const bunnyData = fs.readFileSync(bunnyPath);
+    const originalHash = crypto.createHash('sha256').update(bunnyData).digest('hex');
+    const originalSize = bunnyData.length;
+
+    // Upload bunny video via API using page.evaluate with chunked ArrayBuffer
+    const bunnyArray = Array.from(new Uint8Array(bunnyData));
+    const bunnyFileId = await page.evaluate(
+      async ({ bytes }) => {
+        const arr = new Uint8Array(bytes);
+        const blob = new Blob([arr], { type: 'video/mp4' });
+        const formData = new FormData();
+        formData.append('file', blob, 'bunny_1080p.mp4');
+        const resp = await fetch('/api/files/upload', {
+          method: 'POST',
+          body: formData,
+        });
+        const json = await resp.json();
+        return json.id;
+      },
+      { bytes: bunnyArray },
+    );
+
+    expect(bunnyFileId).toBeTruthy();
+
+    // Wait for processing
+    const deadline = Date.now() + 60_000;
+    while (Date.now() < deadline) {
+      const status = await page.evaluate(async (id) => {
+        const r = await fetch(`/api/files/${id}`);
+        if (!r.ok) return 'unknown';
+        return (await r.json()).status;
+      }, bunnyFileId);
+      if (status === 'stored' || status === 'complete') break;
+      await page.waitForTimeout(1_000);
+    }
+
+    // Verify file appears in UI
+    await page.reload({ waitUntil: 'networkidle' });
+    await page.waitForSelector('[data-testid="file-browser"]', { timeout: 10_000 });
+    const bunnyCard = page.locator('[data-testid="file-card"]', { hasText: 'bunny_1080p.mp4' });
+    await expect(bunnyCard.first()).toBeVisible({ timeout: 15_000 });
+
+    // Download and verify SHA-256 hash matches original
+    const downloadResp = await page.evaluate(async (id) => {
+      const resp = await fetch(`/api/files/${id}/download`);
+      if (!resp.ok) return { error: resp.status };
+      const buf = await resp.arrayBuffer();
+      const hashBuf = await window.crypto.subtle.digest('SHA-256', buf);
+      const hashArr = Array.from(new Uint8Array(hashBuf));
+      return {
+        size: buf.byteLength,
+        hash: hashArr.map((b) => b.toString(16).padStart(2, '0')).join(''),
+      };
+    }, bunnyFileId);
+
+    expect(downloadResp.error).toBeUndefined();
+    expect(downloadResp.size).toBe(originalSize);
+    expect(downloadResp.hash).toBe(originalHash);
   });
 });
