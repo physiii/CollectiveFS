@@ -26,6 +26,9 @@ cryptography/
 # Test artifacts
 test.mk4
 tests/fixtures/*.mp4
+test-results/
+tests/e2e/report/
+.testvenv/
 
 # Node
 ui/node_modules/
