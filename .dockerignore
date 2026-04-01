@@ -15,7 +15,7 @@ ui/dist/
 *.md
 tests/
 cryptography/
-reedsolomon/
+# reedsolomon/ — needed for Go build
 filexfer/
 *.spec
 *.log
