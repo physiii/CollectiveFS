@@ -32,7 +32,7 @@ from typing import Dict, List
 import pytest
 import requests
 
-from test_multinode import (
+from .test_multinode import (
     COMPOSE_FILE,
     NODE_URLS,
     PROJECT_ROOT,

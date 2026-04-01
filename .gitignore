@@ -24,6 +24,11 @@ cryptography/
 
 # Test artifacts
 test.mk4
+tests/fixtures/*.mp4
+
+# Node
+ui/node_modules/
+ui/dist/
 
 # OS
 .DS_Store

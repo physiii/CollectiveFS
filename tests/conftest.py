@@ -17,6 +17,7 @@ from cryptography.fernet import Fernet
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ENCODER_BIN = os.path.join(PROJECT_ROOT, "lib", "encoder")
 DECODER_BIN = os.path.join(PROJECT_ROOT, "lib", "decoder")
+BUNNY_VIDEO = os.path.join(PROJECT_ROOT, "tests", "fixtures", "bunny_1080p.mp4")
 
 
 @pytest.fixture
@@ -104,6 +105,17 @@ def sample_file_large(tmp_path):
         for _ in range(20):
             f.write(os.urandom(1024 * 1024))
     return p
+
+
+@pytest.fixture
+def bunny_video():
+    """
+    Return the path to the Big Buck Bunny 1080p test video (~1 MB).
+    Skips the test if the fixture file is not present.
+    """
+    if not os.path.isfile(BUNNY_VIDEO):
+        pytest.skip("bunny_1080p.mp4 not found – run: make download-fixtures")
+    return BUNNY_VIDEO
 
 
 @pytest.fixture

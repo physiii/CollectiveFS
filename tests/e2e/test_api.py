@@ -10,6 +10,7 @@ Run with:
     pytest tests/e2e/test_api.py -v -m api
 """
 
+import asyncio
 import io
 import pytest
 import pytest_asyncio
@@ -27,14 +28,13 @@ API_PREFIX = "/api"
 # Fixtures
 # ---------------------------------------------------------------------------
 
-@pytest_asyncio.fixture(scope="session")
+@pytest_asyncio.fixture
 async def client():
     """
-    Shared async HTTP client for the entire test session.
+    Async HTTP client, one per test.
 
-    Uses a session-scoped fixture so a single HTTPX client (and underlying
-    connection pool) is reused across all tests in this module, keeping the
-    test suite fast.
+    Using function scope (the default) avoids event-loop-closed errors
+    with pytest-asyncio's auto mode, where each test gets its own loop.
     """
     async with httpx.AsyncClient(base_url=BASE_URL, timeout=30.0) as c:
         yield c
@@ -70,6 +70,19 @@ def _make_upload_file(
 ):
     """Return an httpx-compatible files dict for multipart upload."""
     return {"file": (filename, io.BytesIO(content), mime)}
+
+
+async def _wait_for_file(client: httpx.AsyncClient, file_id: str, timeout: float = 10.0):
+    """Poll until a file's status is no longer 'processing'."""
+    deadline = asyncio.get_event_loop().time() + timeout
+    while asyncio.get_event_loop().time() < deadline:
+        resp = await client.get(f"{API_PREFIX}/files/{file_id}")
+        if resp.status_code == 200:
+            body = resp.json()
+            if body.get("status") != "processing":
+                return body
+        await asyncio.sleep(0.3)
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -128,6 +141,7 @@ async def test_upload_and_list(client: httpx.AsyncClient):
     assert resp.status_code in (200, 201), (
         f"Upload failed: {resp.status_code} – {resp.text}"
     )
+    await _wait_for_file(client, resp.json()["id"])
 
     # The uploaded file must appear in the file list.
     list_resp = await client.get(f"{API_PREFIX}/files")
@@ -174,6 +188,7 @@ async def test_delete_file(client: httpx.AsyncClient):
     )
     assert resp.status_code in (200, 201), f"Upload failed: {resp.status_code} – {resp.text}"
     file_id = resp.json()["id"]
+    await _wait_for_file(client, file_id)
 
     # Delete
     del_resp = await client.delete(f"{API_PREFIX}/files/{file_id}")
@@ -230,6 +245,9 @@ async def test_upload_multiple_files(client: httpx.AsyncClient):
         uploaded_ids.append(resp.json()["id"])
 
     assert len(uploaded_ids) == 3, "Should have uploaded exactly 3 files"
+
+    for fid in uploaded_ids:
+        await _wait_for_file(client, fid)
 
     list_resp = await client.get(f"{API_PREFIX}/files")
     assert list_resp.status_code == 200

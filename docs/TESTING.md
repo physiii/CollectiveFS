@@ -29,14 +29,14 @@ tests/
 │   ├── test_integrity.py     ← SHA-256 preservation, tamper detection (6 tests)
 │   └── test_throughput.py    ← Performance benchmarks (7 tests)
 ├── e2e/                      ← Requires running API server
-│   ├── test_api.py           ← REST API CRUD operations (11 tests)
+│   ├── test_api.py           ← REST API CRUD operations (9 tests)
 │   └── browser.spec.js       ← Playwright browser tests
 ├── fuse/                     ← Requires pyfuse3
-│   └── test_fuse_ops.py      ← FUSE filesystem operations (9 tests)
+│   └── test_fuse_ops.py      ← FUSE filesystem operations (8 tests)
 └── cluster/                  ← Requires Docker Compose
-    ├── test_multinode.py     ← Cluster health, peer discovery, metadata (30+ tests)
+    ├── test_multinode.py     ← Cluster health, peer discovery, metadata (28 tests)
     ├── test_data_integrity.py← Upload → download → SHA-256 verify (7 tests)
-    └── test_node_drop.py     ← Progressive node drop until corruption (8 tests)
+    └── test_node_drop.py     ← Progressive node drop until corruption (10 tests)
 ```
 
 ## Running tests
@@ -55,7 +55,7 @@ These test the full encode/decode pipeline using the Go binaries.
 
 ```bash
 # Build the binaries first
-cd lib && make && cd ..
+make build
 
 # Run evaluation tests
 python -m pytest tests/eval/ -v
@@ -65,7 +65,8 @@ If the binaries aren't built, these tests skip automatically.
 
 ### E2E API tests
 
-These need a running API server.
+These need a running API server. Uploads are processed asynchronously, so the
+tests poll for completion before asserting.
 
 ```bash
 # In one terminal, start the server:
@@ -153,12 +154,18 @@ python -m pytest -m "cluster" -v       # only cluster tests
 
 **Tests skip with "lib/encoder not found"**
 
-Build the Go binaries: `cd lib && make`
+Build the Go binaries: `make build`
 
 **Cluster tests fail to start**
 
 Check Docker is running: `docker info`
 Check ports 8001-8003 are free: `ss -tlnp | grep 800`
+
+**Docker mount errors on network filesystems**
+
+Docker volume mounts (e.g. `./lib:/app/lib:ro`) fail if the repo lives on
+SSHFS, NFS, or other FUSE mounts because the Docker daemon runs as root and
+cannot access user-space mounts. Clone the repo to a local filesystem instead.
 
 **Pytest collection error with pytest-asyncio**
 
