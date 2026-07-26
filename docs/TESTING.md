@@ -10,6 +10,7 @@
 | **e2e API** | `pytest tests/e2e/test_api.py -v -m api` | 27 pass | ~4s | No (needs a running node) |
 | **Playwright UI** | `npx playwright test --project=chromium` | 26 pass | ~25s | No (starts its own node) |
 | **Cluster** | `pytest tests/cluster/ -v -m cluster --timeout=180` | 39 pass, 6 known failures | ~4.5 min | Yes (3-node) |
+| **Mount evaluation** | `make eval-mount` | Performance report | ~15-40 min | No (needs two mounted nodes) |
 
 The unit tier covers the storage engine (`test_contracts`, `test_crypto`,
 `test_metadata`) and the console services behind the UI: `test_config_service`
@@ -206,6 +207,44 @@ model. The CLI providers are exercised separately — see *Agent backends* in
 
 Fixtures use unique filenames, so the suite is safe to run repeatedly against a
 node that already holds data.
+
+### Mount evaluation
+
+The performance and evaluation suite measures what a user actually experiences:
+writing through `/media/collectivefs` on one machine and reading it back on
+another, with erasure coding, encryption, shard distribution and peer routing
+all in the path. It writes both a JSON record and a Markdown report.
+
+```bash
+# Both nodes must be running with /media/collectivefs mounted.
+python -m benchmarks.run_mount_eval \
+  --node sonic=http://localhost:8010 \
+  --node office=http://192.168.1.43:8010@office \
+  --iterations 3 --max-size 64MB \
+  --degraded --contracts --saturate \
+  --report benchmarks/results/mount-eval.md
+```
+
+`name=api_url` drives this machine; `name=api_url@ssh_target` drives another
+over ssh. What it measures:
+
+| Section | Measures |
+|---------|----------|
+| Compute under test | CPU, memory, OS, backing disk, quota, interconnect latency |
+| Throughput by file size | Write and read MB/s from 4 KB to 256 MB, SHA-256 verified |
+| Operation latency | Median/p95/max for create, stat, readdir, rename, copy, mkdir, unlink |
+| Kernel-level op mix | FUSE-reported per-call cost, excluding shell startup |
+| Concurrent load | Aggregate throughput across parallel writers |
+| Cross-node reconciliation | Time until a write is visible, then readable, on the peer |
+| Shard distribution | Placement, storage expansion, shards held for peers |
+| Fault tolerance | `--degraded`: read with the peer holding remote shards stopped |
+| Peer contracts | `--contracts`: proof-of-storage challenge latency and QoS |
+| Quota saturation | `--saturate`: drives past the write cutoff on a temporary quota |
+| Console/mount parity | The UI and the mount must list identical file sets |
+
+`--saturate` deliberately uses a temporary small quota and restores the original
+afterwards: filling a 1 TB pledge would take hours, and the cutoff behaviour is
+identical at any quota.
 
 ### Cluster tests
 

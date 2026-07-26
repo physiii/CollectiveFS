@@ -117,6 +117,7 @@ async def push_shard(
     index: int,
     name: str,
     payload: bytes,
+    shard_id: str = "",
 ) -> str:
     """Upload one shard to a peer and return the digest it stored.
 
@@ -132,6 +133,9 @@ async def push_shard(
             "file_id": file_id,
             "index": str(index),
             "name": name,
+            # Carried so the peer can answer a proof-of-storage challenge about
+            # this shard: challenges name a shard id, not a path.
+            "shard_id": shard_id,
         },
     )
     if response.status_code >= 400:
@@ -194,6 +198,7 @@ async def distribute(
                     index=index,
                     name=path.name,
                     payload=payload,
+                    shard_id=chunk.get("id", ""),
                 )
             except (httpx.HTTPError, ReplicationError) as exc:
                 failures.append(f"shard {index}: {exc}")

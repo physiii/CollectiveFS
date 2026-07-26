@@ -1,5 +1,5 @@
 .PHONY: all build build-go build-ui build-docker install test test-unit test-eval \
-        test-ui test-cluster test-all clean
+        test-ui test-cluster test-all eval-mount clean
 
 all: build
 
@@ -38,6 +38,17 @@ test-eval: build-go
 # Playwright starts its own node against a throwaway store; the UI must be built.
 test-ui: build-ui
 	npx playwright test tests/e2e/browser.spec.js
+
+# Full performance and evaluation report across the mounted cluster.
+# Override NODES to point at a different fleet.
+NODES ?= --node sonic=http://localhost:8010 --node office=http://192.168.1.43:8010@office
+eval-mount:
+	.venv/bin/python -m benchmarks.run_mount_eval $(NODES) \
+	  --iterations 3 --op-iterations 12 --recon-iterations 5 \
+	  --max-size 64MB --streams 8 --stream-size 8MB \
+	  --degraded --contracts --saturate \
+	  --report benchmarks/results/mount-eval.md \
+	  --json benchmarks/results/mount-eval.json
 
 test-cluster: build-go build-docker
 	python -m pytest tests/cluster/ -v -m cluster --timeout=180

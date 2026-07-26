@@ -517,7 +517,13 @@ class ContractManager:
         return None
 
     def _find_shard_path_by_id(self, shard_id: str, tree_dir: Path) -> Optional[Path]:
-        """Look up the actual file path for a shard ID from tree metadata."""
+        """Look up the file backing a shard ID, ours or a peer's.
+
+        A challenge asks about a shard we are *storing for someone else*, which
+        lives under ``proc/_peers/`` and appears in no tree of ours. Searching
+        only local tree metadata meant a node could never prove it was holding
+        a replica — which is precisely what proof-of-storage exists to check.
+        """
         for tree_file in tree_dir.glob("*.json"):
             try:
                 with open(tree_file) as f:
@@ -529,6 +535,24 @@ class ContractManager:
                             return p
             except Exception:
                 continue
+
+        # Replicas are named by the origin's shard file, so the id is carried in
+        # the index the receiving side wrote when it accepted the shard.
+        replica_index = self.collective_path / "replicas.json"
+        try:
+            index = json.loads(replica_index.read_text())
+        except (OSError, ValueError):
+            return None
+        for origin_node, node in index.items():
+            for file_id, entry in (node.get("files") or {}).items():
+                for shard_index, meta in (entry.get("shards") or {}).items():
+                    if meta.get("shard_id") != shard_id:
+                        continue
+                    candidate = (
+                        self.collective_path / "proc" / "_peers" / origin_node / file_id / meta["name"]
+                    )
+                    if candidate.exists():
+                        return candidate
         return None
 
     def issue_challenge(

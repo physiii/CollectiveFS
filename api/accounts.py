@@ -96,6 +96,21 @@ class AccountStore:
             self._write(data)
             return data["tokens"][token]
 
+    def set_default(self, token: str, label: str = "") -> str:
+        """Make `token` this node's default account.
+
+        The console sends no token, so it resolves to the default. On a node
+        joining someone else's namespace that has to be the shared account, or
+        the web UI and the mount would show different file sets on the same
+        machine.
+        """
+        with _lock:
+            data = json.loads(json.dumps(self._load_raw()))
+            data.setdefault("tokens", {}).setdefault(token, {"label": label or "shared"})
+            data["default"] = token
+            self._write(data)
+            return token
+
     def create(self, label: str = "") -> str:
         token = new_token()
         self.register(token, label)

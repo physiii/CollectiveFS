@@ -1230,6 +1230,7 @@ async def receive_shard(
     file_id: str = Form(...),
     index: int = Form(...),
     name: str = Form(...),
+    shard_id: str = Form(""),
 ) -> Dict[str, Any]:
     """Store one shard on behalf of a peer and report the digest written.
 
@@ -1250,7 +1251,9 @@ async def receive_shard(
     payload = await shard.read()
     (directory / safe_name).write_bytes(payload)
 
-    _replica_index_write(origin_node, file_id, origin_url, index, safe_name, len(payload))
+    _replica_index_write(
+        origin_node, file_id, origin_url, index, safe_name, len(payload), shard_id
+    )
     return {
         "stored": True,
         "digest": replication.digest(payload),
@@ -1274,14 +1277,22 @@ def _replica_index_read() -> Dict[str, Any]:
 
 
 def _replica_index_write(
-    origin_node: str, file_id: str, origin_url: str, index: int, name: str, size: int
+    origin_node: str,
+    file_id: str,
+    origin_url: str,
+    index: int,
+    name: str,
+    size: int,
+    shard_id: str = "",
 ) -> None:
     data = _replica_index_read()
     node = data.setdefault(origin_node, {"origin_url": origin_url, "files": {}})
     if origin_url:
         node["origin_url"] = origin_url
     entry = node["files"].setdefault(file_id, {"shards": {}})
-    entry["shards"][str(index)] = {"name": name, "size": size}
+    # shard_id is what a proof-of-storage challenge names, so it has to be
+    # recorded here or the shard can never be located to answer one.
+    entry["shards"][str(index)] = {"name": name, "size": size, "shard_id": shard_id}
     try:
         _replica_index_path().write_text(json.dumps(data, indent=2))
     except OSError:
@@ -1624,13 +1635,25 @@ async def get_account(request: Request) -> Dict[str, Any]:
 
 @app.post("/api/account/tokens")
 async def create_account_token(body: Dict[str, Any]) -> Dict[str, Any]:
-    """Mint a new account, or adopt one issued by another node."""
+    """Mint a new account, or adopt one issued by another node.
+
+    `default: true` also makes it this node's default, which is what a node
+    joining an existing namespace wants — otherwise the console keeps showing
+    the node's own account while the mount shows the shared one.
+    """
     existing = (body.get("token") or "").strip()
     label = (body.get("label") or "").strip()
+    make_default = bool(body.get("default"))
     if existing:
-        account_store.register(existing, label)
-        return {"token": existing, "adopted": True}
-    return {"token": account_store.create(label), "adopted": False}
+        if make_default:
+            account_store.set_default(existing, label)
+        else:
+            account_store.register(existing, label)
+        return {"token": existing, "adopted": True, "default": make_default}
+    token = account_store.create(label)
+    if make_default:
+        account_store.set_default(token, label)
+    return {"token": token, "adopted": False, "default": make_default}
 
 
 @app.post("/api/fs/metrics")
