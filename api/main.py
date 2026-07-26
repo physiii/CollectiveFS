@@ -573,14 +573,34 @@ async def _forward(
         )
 
 
+async def _peer_folders() -> List[str]:
+    """Folders peers have created. A folder holding no files exists only in the
+    folder index, so without this an empty directory made on one machine would
+    never appear on another."""
+    out: List[str] = []
+    for peer in list(_peers.values()):
+        if not peer.get("healthy") or not peer.get("url"):
+            continue
+        try:
+            async with httpx.AsyncClient(timeout=8.0) as client:
+                response = await client.get(f"{peer['url']}/api/peers/folders")
+            if response.status_code < 400:
+                out.extend(response.json().get("folders", []))
+        except (httpx.HTTPError, ValueError):
+            continue
+    return out
+
+
 async def _tree_for(token: str, scope: str) -> Dict[str, Any]:
     files = _files_for(token)
+    folders = folder_store.load()
     if scope == "network":
         known = {item.get("id") for item in files}
         for item in await _peer_files(token):
             if item.get("id") not in known:
                 files.append(item)
-    return files_service.build_tree(files, folder_store.load(), _file_statuses)
+        folders = sorted(set(folders) | set(await _peer_folders()))
+    return files_service.build_tree(files, folders, _file_statuses)
 
 
 @app.get("/api/files/tree")
@@ -610,17 +630,49 @@ async def files_browse(
         raise HTTPException(status_code=404, detail=str(exc))
 
 
+async def _broadcast_folder(method: str, path: str, propagate: bool) -> None:
+    """Mirror a folder change onto peers.
+
+    Folders are a shared namespace, so a directory created on one machine has
+    to appear on the others. `propagate` is false on the inbound copy to stop
+    two nodes bouncing the same change back and forth.
+    """
+    if not propagate:
+        return
+    for peer in list(_peers.values()):
+        if not peer.get("healthy") or not peer.get("url"):
+            continue
+        try:
+            async with httpx.AsyncClient(timeout=8.0) as client:
+                if method == "POST":
+                    await client.post(
+                        f"{peer['url']}/api/folders",
+                        json={"path": path, "propagate": False},
+                    )
+                else:
+                    await client.delete(
+                        f"{peer['url']}/api/folders",
+                        params={"path": path, "propagate": "false"},
+                    )
+        except httpx.HTTPError:
+            continue  # A peer that is down picks it up from the tree union.
+
+
 @app.post("/api/folders")
 async def create_folder(body: Dict[str, Any]) -> Dict[str, Any]:
+    path = body.get("path") or body.get("name") or ""
     try:
-        folders = folder_store.add(body.get("path") or body.get("name") or "")
+        folders = folder_store.add(path)
     except FileTreeError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+    await _broadcast_folder("POST", path, body.get("propagate", True))
     return {"folders": folders}
 
 
 @app.delete("/api/folders")
-async def delete_folder(path: str = Query(...)) -> Dict[str, Any]:
+async def delete_folder(
+    path: str = Query(...), propagate: bool = Query(True)
+) -> Dict[str, Any]:
     """Forget a folder. Files inside it are moved to the root, never deleted."""
     try:
         target = files_service.normalize_folder(path)
@@ -641,6 +693,7 @@ async def delete_folder(path: str = Query(...)) -> Dict[str, Any]:
             moved += 1
 
     folders = folder_store.remove(target)
+    await _broadcast_folder("DELETE", target, propagate)
     return {"folders": folders, "files_moved_to_root": moved}
 
 
@@ -1242,6 +1295,12 @@ async def drop_replicas(origin_node: str, file_id: str) -> Dict[str, Any]:
         except OSError:
             pass
     return {"dropped": removed}
+
+
+@app.get("/api/peers/folders")
+async def peer_folders() -> Dict[str, Any]:
+    """Folders this node knows about, so peers can show empty ones too."""
+    return {"folders": folder_store.load()}
 
 
 @app.get("/api/peers/chunks/{chunk_id}")
