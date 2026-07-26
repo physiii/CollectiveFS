@@ -12,6 +12,7 @@ Run with:
 
 import asyncio
 import io
+import os
 import pytest
 import pytest_asyncio
 import httpx
@@ -20,7 +21,9 @@ import httpx
 # Configuration
 # ---------------------------------------------------------------------------
 
-BASE_URL = "http://localhost:8000"
+# Overridable so the suite can run against a scratch node instead of whatever
+# happens to hold port 8000.
+BASE_URL = os.environ.get("CFS_API_URL", "http://localhost:8000")
 API_PREFIX = "/api"
 
 
@@ -257,3 +260,286 @@ async def test_upload_multiple_files(client: httpx.AsyncClient):
 
     missing = expected_names - returned_names
     assert not missing, f"These uploaded files are missing from the list: {missing}"
+
+
+# ---------------------------------------------------------------------------
+# Files explorer: folder tree, browsing, move/rename
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.api
+@pytest.mark.asyncio
+async def test_upload_into_a_folder_shows_in_the_tree(client: httpx.AsyncClient):
+    resp = await client.post(
+        f"{API_PREFIX}/files/upload",
+        files=_make_upload_file("tree-file.txt", b"in a folder"),
+        data={"folder": "alpha/beta"},
+    )
+    assert resp.status_code in (200, 201), resp.text
+    file_id = resp.json()["id"]
+    await _wait_for_file(client, file_id)
+
+    tree = (await client.get(f"{API_PREFIX}/files/tree")).json()
+    paths = {folder["path"] for folder in tree["folders"]}
+    assert {"alpha", "alpha/beta"} <= paths
+
+    entry = next(item for item in tree["files"] if item["id"] == file_id)
+    assert entry["folder"] == "alpha/beta"
+    assert entry["path"] == "alpha/beta/tree-file.txt"
+    assert entry["shards_total"] >= 1
+    assert entry["shards_available"] == entry["shards_total"]
+
+
+@pytest.mark.api
+@pytest.mark.asyncio
+async def test_browse_returns_direct_children_and_breadcrumbs(client: httpx.AsyncClient):
+    resp = await client.post(
+        f"{API_PREFIX}/files/upload",
+        files=_make_upload_file("browse-me.txt", b"hello"),
+        data={"folder": "docs/reports"},
+    )
+    await _wait_for_file(client, resp.json()["id"])
+
+    docs = (await client.get(f"{API_PREFIX}/files/browse", params={"path": "docs"})).json()
+    assert [folder["name"] for folder in docs["folders"]] == ["reports"]
+    assert docs["files"] == []
+
+    reports = (await client.get(f"{API_PREFIX}/files/browse", params={"path": "docs/reports"})).json()
+    assert [item["name"] for item in reports["files"]] == ["browse-me.txt"]
+    assert [crumb["name"] for crumb in reports["breadcrumbs"]] == ["All Files", "docs", "reports"]
+
+
+@pytest.mark.api
+@pytest.mark.asyncio
+async def test_browse_unknown_folder_is_404(client: httpx.AsyncClient):
+    resp = await client.get(f"{API_PREFIX}/files/browse", params={"path": "no/such/folder"})
+    assert resp.status_code == 404
+
+
+@pytest.mark.api
+@pytest.mark.asyncio
+async def test_folder_traversal_is_rejected(client: httpx.AsyncClient):
+    resp = await client.post(f"{API_PREFIX}/folders", json={"path": "../../etc"})
+    assert resp.status_code == 400
+    assert ".." in resp.json()["detail"]
+
+
+@pytest.mark.api
+@pytest.mark.asyncio
+async def test_rename_and_move_a_file(client: httpx.AsyncClient):
+    resp = await client.post(
+        f"{API_PREFIX}/files/upload", files=_make_upload_file("original.txt", b"move me")
+    )
+    file_id = resp.json()["id"]
+    await _wait_for_file(client, file_id)
+
+    patched = await client.patch(
+        f"{API_PREFIX}/files/{file_id}", json={"name": "renamed.txt", "folder": "moved/here"}
+    )
+    assert patched.status_code == 200
+    assert patched.json()["name"] == "renamed.txt"
+    assert patched.json()["folder"] == "moved/here"
+
+    listing = (await client.get(f"{API_PREFIX}/files/browse", params={"path": "moved/here"})).json()
+    assert [item["name"] for item in listing["files"]] == ["renamed.txt"]
+
+
+@pytest.mark.api
+@pytest.mark.asyncio
+async def test_rename_collision_is_rejected(client: httpx.AsyncClient):
+    first = await client.post(f"{API_PREFIX}/files/upload", files=_make_upload_file("a.txt", b"one"))
+    second = await client.post(f"{API_PREFIX}/files/upload", files=_make_upload_file("b.txt", b"two"))
+    await _wait_for_file(client, first.json()["id"])
+    await _wait_for_file(client, second.json()["id"])
+
+    resp = await client.patch(f"{API_PREFIX}/files/{second.json()['id']}", json={"name": "a.txt"})
+    assert resp.status_code == 400
+    assert "already exists" in resp.json()["detail"]
+
+
+@pytest.mark.api
+@pytest.mark.asyncio
+async def test_deleting_a_folder_keeps_its_files(client: httpx.AsyncClient):
+    resp = await client.post(
+        f"{API_PREFIX}/files/upload",
+        files=_make_upload_file("survivor.txt", b"keep me"),
+        data={"folder": "temporary"},
+    )
+    file_id = resp.json()["id"]
+    await _wait_for_file(client, file_id)
+
+    deleted = await client.request("DELETE", f"{API_PREFIX}/folders", params={"path": "temporary"})
+    assert deleted.status_code == 200
+    assert deleted.json()["files_moved_to_root"] == 1
+
+    still_there = await client.get(f"{API_PREFIX}/files/{file_id}")
+    assert still_there.status_code == 200
+    assert still_there.json()["folder"] is None
+
+
+# ---------------------------------------------------------------------------
+# System overview
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.api
+@pytest.mark.asyncio
+async def test_system_overview_shape(client: httpx.AsyncClient):
+    resp = await client.get(f"{API_PREFIX}/system/overview")
+    assert resp.status_code == 200
+    data = resp.json()
+
+    for key in ("hostname", "node_id", "cpu", "memory", "disks", "network", "collective", "erasure"):
+        assert key in data, f"missing {key}"
+
+    assert data["cpu"]["id"] == "cpu"
+    assert data["collective"]["quota_bytes"] > 0
+    assert data["erasure"]["total_shards"] == (
+        data["erasure"]["data_shards"] + data["erasure"]["parity_shards"]
+    )
+    for iface in data["network"]:
+        assert "virtual" in iface
+
+
+@pytest.mark.api
+@pytest.mark.asyncio
+async def test_overview_tracks_stored_shards(client: httpx.AsyncClient):
+    before = (await client.get(f"{API_PREFIX}/system/overview")).json()["collective"]
+
+    resp = await client.post(
+        f"{API_PREFIX}/files/upload", files=_make_upload_file("counted.bin", b"x" * 2048)
+    )
+    await _wait_for_file(client, resp.json()["id"])
+
+    after = (await client.get(f"{API_PREFIX}/system/overview")).json()["collective"]
+    assert after["files"] == before["files"] + 1
+    assert after["shards_total"] > before["shards_total"]
+    assert after["shards_missing"] == 0
+
+
+# ---------------------------------------------------------------------------
+# Configuration
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.api
+@pytest.mark.asyncio
+async def test_config_get_returns_config_and_schema(client: httpx.AsyncClient):
+    resp = await client.get(f"{API_PREFIX}/config")
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["config"]["erasure"]["data_shards"] >= 1
+    fields = {spec["field"] for spec in payload["schema"]}
+    assert "storage.quota_bytes" in fields
+
+
+@pytest.mark.api
+@pytest.mark.asyncio
+async def test_config_put_applies_and_audits(client: httpx.AsyncClient):
+    resp = await client.put(f"{API_PREFIX}/config", json={"updates": {"contracts.max_peers": 37}})
+    assert resp.status_code == 200
+    assert resp.json()["config"]["contracts"]["max_peers"] == 37
+
+    audit = (await client.get(f"{API_PREFIX}/config/audit", params={"limit": 5})).json()
+    fields = [c["field"] for entry in audit["entries"] for c in entry["changes"]]
+    assert "contracts.max_peers" in fields
+
+
+@pytest.mark.api
+@pytest.mark.asyncio
+async def test_config_rejects_impossible_quota(client: httpx.AsyncClient):
+    before = (await client.get(f"{API_PREFIX}/config")).json()["config"]["storage"]["quota_bytes"]
+    resp = await client.put(f"{API_PREFIX}/config", json={"updates": {"storage.quota_bytes": "9000PB"}})
+    assert resp.status_code == 400
+    after = (await client.get(f"{API_PREFIX}/config")).json()["config"]["storage"]["quota_bytes"]
+    assert after == before
+
+
+@pytest.mark.api
+@pytest.mark.asyncio
+async def test_erasure_config_drives_the_encoder(client: httpx.AsyncClient):
+    await client.put(
+        f"{API_PREFIX}/config",
+        json={"updates": {"erasure.data_shards": 4, "erasure.parity_shards": 2}},
+    )
+    resp = await client.post(
+        f"{API_PREFIX}/files/upload", files=_make_upload_file("shaped.bin", b"y" * 8192)
+    )
+    file_id = resp.json()["id"]
+    await _wait_for_file(client, file_id)
+
+    detail = (await client.get(f"{API_PREFIX}/files/{file_id}")).json()
+    # The encoder writes one file per shard; a 4+2 layout must produce fewer
+    # shards than the 8+4 default would have.
+    assert detail["chunks"] <= 8, detail["chunks"]
+
+
+@pytest.mark.api
+@pytest.mark.asyncio
+async def test_upload_over_the_limit_is_rejected(client: httpx.AsyncClient):
+    # 1 MiB is the smallest cap the schema allows.
+    limit = await client.put(
+        f"{API_PREFIX}/config", json={"updates": {"upload.max_file_bytes": "1MB"}}
+    )
+    assert limit.status_code == 200, limit.text
+    try:
+        resp = await client.post(
+            f"{API_PREFIX}/files/upload", files=_make_upload_file("too-big.bin", b"z" * (2 * 1024 ** 2))
+        )
+        assert resp.status_code == 413, resp.text
+        assert "upload limit" in resp.json()["detail"]
+    finally:
+        await client.put(
+            f"{API_PREFIX}/config", json={"updates": {"upload.max_file_bytes": "1GB"}}
+        )
+
+
+# ---------------------------------------------------------------------------
+# Agent / chat
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.api
+@pytest.mark.asyncio
+async def test_providers_lists_all_backends(client: httpx.AsyncClient):
+    payload = (await client.get(f"{API_PREFIX}/agent/providers")).json()
+    ids = [entry["id"] for entry in payload["providers"]]
+    assert ids == ["codewhale", "claude", "codex", "builtin"]
+    assert payload["active"] in ids
+
+
+@pytest.mark.api
+@pytest.mark.asyncio
+async def test_chat_changes_configuration(client: httpx.AsyncClient):
+    await client.put(f"{API_PREFIX}/config", json={"updates": {"storage.quota_bytes": "30GB"}})
+    resp = await client.post(
+        f"{API_PREFIX}/chat",
+        json={"section": "system", "message": "allocate 70GB", "provider": "builtin"},
+    )
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["error"] is None
+    assert payload["applied"][0]["field"] == "storage.quota_bytes"
+    assert payload["applied"][0]["after"] == 70 * 1024 ** 3
+
+    config = (await client.get(f"{API_PREFIX}/config")).json()["config"]
+    assert config["storage"]["quota_bytes"] == 70 * 1024 ** 3
+
+
+@pytest.mark.api
+@pytest.mark.asyncio
+async def test_chat_refuses_an_invalid_change(client: httpx.AsyncClient):
+    resp = await client.post(
+        f"{API_PREFIX}/chat",
+        json={"section": "system", "message": "set parity shards to 90", "provider": "builtin"},
+    )
+    payload = resp.json()
+    assert payload["applied"] == []
+    assert "at most 32" in payload["error"]
+
+
+@pytest.mark.api
+@pytest.mark.asyncio
+async def test_chat_requires_a_message(client: httpx.AsyncClient):
+    resp = await client.post(f"{API_PREFIX}/chat", json={"section": "system", "message": "  "})
+    assert resp.status_code == 400

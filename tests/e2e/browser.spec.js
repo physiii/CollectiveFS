@@ -1,1430 +1,414 @@
 /**
  * browser.spec.js
  *
- * Comprehensive Playwright end-to-end test suite for CollectiveFS.
- * Tests the React file-browser UI against a live API backend (port 8000).
+ * End-to-end suite for the CollectiveFS console: the Files explorer and the
+ * System & Infrastructure section, including the section chat's ability to
+ * actually change node configuration.
  *
  * Run with:
  *   npx playwright test tests/e2e/browser.spec.js
- */
-
-import { test, expect } from '@playwright/test';
-import path from 'path';
-import fs from 'fs';
-import os from 'os';
-import crypto from 'crypto';
-import { fileURLToPath } from 'url';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-// ---------------------------------------------------------------------------
-// Helper utilities
-// ---------------------------------------------------------------------------
-
-/**
- * Create a tiny temp file on disk, then upload it via the API so it is
- * visible in the UI without going through a real file-picker dialog.
  *
- * @param {import('@playwright/test').Page} page
- * @param {string} filename
- * @param {string} content   UTF-8 text content (keep small for speed)
- * @returns {Promise<string>} The file id returned by the API
+ * The webServer in playwright.config.js starts the API on :8000, which also
+ * serves the built UI from ui/dist. Build the UI first (`cd ui && npm run build`).
  */
-async function uploadTestFile(page, filename, content = 'CFS test data') {
-  const tmpPath = path.join(os.tmpdir(), filename);
-  fs.writeFileSync(tmpPath, content, 'utf8');
 
-  // Upload via fetch inside the browser context so it hits the same origin.
-  const fileId = await page.evaluate(
-    async ({ fname, fcontent }) => {
-      const blob = new Blob([fcontent], { type: 'application/octet-stream' });
-      const formData = new FormData();
-      formData.append('file', blob, fname);
-      const resp = await fetch('/api/files/upload', {
-        method: 'POST',
-        body: formData,
-      });
-      if (!resp.ok) {
-        throw new Error(`Upload failed: ${resp.status} ${await resp.text()}`);
-      }
-      const json = await resp.json();
-      return json.id;
+import { expect, test } from '@playwright/test'
+
+// ── helpers ─────────────────────────────────────────────────────────
+
+// Tests run against a real node that may already hold data (both browser
+// projects share one store), so fixtures get unique names rather than
+// assuming an empty file list.
+let seq = 0
+const RUN = Math.random().toString(36).slice(2, 7)
+function uniq(name) {
+  seq += 1
+  const dot = name.lastIndexOf('.')
+  const stem = dot === -1 ? name : name.slice(0, dot)
+  const ext = dot === -1 ? '' : name.slice(dot)
+  return `${stem}-${RUN}${seq}${ext}`
+}
+
+/** Upload through the API from inside the page so it hits the same origin. */
+async function uploadFile(page, name, content = 'CollectiveFS test data', folder = '') {
+  return page.evaluate(
+    async ({ name, content, folder }) => {
+      const form = new FormData()
+      form.append('file', new Blob([content], { type: 'application/octet-stream' }), name)
+      form.append('folder', folder)
+      const response = await fetch('/api/files/upload', { method: 'POST', body: form })
+      if (!response.ok) throw new Error(`Upload failed: ${response.status} ${await response.text()}`)
+      return (await response.json()).id
     },
-    { fname: filename, fcontent: content },
-  );
-
-  fs.unlinkSync(tmpPath);
-  return fileId;
+    { name, content, folder },
+  )
 }
 
-/**
- * Poll until the file-card for `filename` shows status "complete" (or until
- * a timeout is reached).
- *
- * @param {import('@playwright/test').Page} page
- * @param {string} filename
- * @param {number} timeout  milliseconds to wait (default 20 s)
- */
-async function waitForFileProcessing(page, filename, timeout = 20_000) {
-  const deadline = Date.now() + timeout;
-  while (Date.now() < deadline) {
-    const card = page.locator(`[data-testid="file-card"]`, { hasText: filename }).first();
-    const exists = await card.count();
-    if (exists > 0) {
-      const text = await card.textContent();
-      if (text && (text.toLowerCase().includes('complete') || text.toLowerCase().includes('stored'))) {
-        return;
-      }
-    }
-    await page.waitForTimeout(500);
-  }
-  // Not a hard failure – the test that cares about the status will assert it.
+async function apiJson(page, path, init) {
+  return page.evaluate(
+    async ({ path, init }) => {
+      const response = await fetch(path, init)
+      const text = await response.text()
+      return { status: response.status, body: text ? JSON.parse(text) : null }
+    },
+    { path, init },
+  )
 }
 
-/**
- * Delete all files visible in the API so each test starts from a clean state.
- *
- * @param {import('@playwright/test').Page} page
- */
-async function cleanupFiles(page) {
-  await page.evaluate(async () => {
-    const resp = await fetch('/api/files');
-    if (!resp.ok) return;
-    const files = await resp.json();
-    await Promise.all(
-      files.map((f) =>
-        fetch(`/api/files/${f.id}`, { method: 'DELETE' }).catch(() => {}),
-      ),
-    );
-  });
+async function readConfig(page) {
+  const { body } = await apiJson(page, '/api/config')
+  return body.config
 }
 
-// ---------------------------------------------------------------------------
-// Global setup / teardown
-// ---------------------------------------------------------------------------
+async function writeConfig(page, updates) {
+  return apiJson(page, '/api/config', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ updates }),
+  })
+}
 
-test.beforeEach(async ({ page }) => {
-  await page.goto('/', { waitUntil: 'networkidle' });
-  // Wait for the main app shell to be visible before each test.
-  await page.waitForSelector('[data-testid="file-browser"]', { timeout: 15_000 });
-});
+/** Chat pinned to the deterministic provider so the suite never needs an LLM. */
+async function chat(page, section, message) {
+  const { body } = await apiJson(page, '/api/chat', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ section, message, provider: 'builtin' }),
+  })
+  return body
+}
 
-test.afterEach(async ({ page }) => {
-  await cleanupFiles(page);
-});
+async function openSection(page, id) {
+  await page.goto('/')
+  await page.waitForSelector(`[data-testid="section-${id}"]`)
+  await page.locator(`[data-testid="section-${id}"] .section-title-button`).click()
+  await expect(page).toHaveURL(new RegExp(`/sections/${id}`))
+  await page.waitForSelector('.section-card.full')
+}
 
-// ===========================================================================
-// Suite 1 – Layout and Navigation
-// ===========================================================================
+// ── shell ───────────────────────────────────────────────────────────
 
-test.describe('Layout and Navigation', () => {
-  test('loads the page and shows main layout', async ({ page }) => {
-    await expect(page.getByTestId('top-bar')).toBeVisible();
-    await expect(page.getByTestId('sidebar')).toBeVisible();
-    await expect(page.getByTestId('file-browser')).toBeVisible();
-  });
+test.describe('console shell', () => {
+  test('renders both sections with Files first', async ({ page }) => {
+    await page.goto('/')
+    await expect(page.locator('.topbar-brand')).toHaveText('CollectiveFS')
 
-  test('sidebar shows navigation items', async ({ page }) => {
-    const sidebar = page.getByTestId('sidebar');
-    await expect(sidebar).toBeVisible();
-    // The sidebar should list at least "Files" and "Settings" links.
-    await expect(sidebar).toContainText('Files');
-    await expect(sidebar).toContainText('Settings');
-  });
+    const titles = await page.locator('.section-card-title').allTextContents()
+    expect(titles).toEqual(['Files', 'System & Infrastructure'])
+  })
 
-  test('status bar shows system info', async ({ page }) => {
-    const bar = page.getByTestId('status-bar');
-    await expect(bar).toBeVisible();
-    // Should mention encryption (Fernet) and erasure coding scheme.
-    const text = await bar.textContent();
-    expect(text).toBeTruthy();
-    // At minimum a non-empty status bar renders without crashing.
-    expect(text.length).toBeGreaterThan(0);
-  });
+  test('each section offers dashboard, chat and skill views', async ({ page }) => {
+    await page.goto('/')
+    const card = page.locator('[data-testid="section-files"]')
+    // dashboard, chat, skill, collapse
+    await expect(card.locator('.section-toggle button')).toHaveCount(4)
 
-  test('topbar shows search and upload button', async ({ page }) => {
-    await expect(page.getByTestId('top-bar')).toBeVisible();
-    await expect(page.getByTestId('search-input')).toBeVisible();
-    await expect(page.getByTestId('upload-button')).toBeVisible();
-  });
+    await card.locator('button[aria-label^="Chat"]').click()
+    await expect(card.locator('[data-testid="section-chat-files"]')).toBeVisible()
 
-  test('switches between grid and list view', async ({ page }) => {
-    // Start from whichever view is default.
-    const gridToggle = page.getByTestId('view-grid');
-    const listToggle = page.getByTestId('view-list');
-    await expect(gridToggle).toBeVisible();
-    await expect(listToggle).toBeVisible();
+    await card.locator('button[aria-label^="Show Files skill"]').click()
+    await expect(card.locator('.section-skill-doc')).toContainText('Reed-Solomon')
+  })
 
-    // Click list view.
-    await listToggle.click();
-    // After switching, the list toggle is active – verify no crash and that
-    // the file-browser is still present.
-    await expect(page.getByTestId('file-browser')).toBeVisible();
+  test('a section collapses and stays collapsed across reloads', async ({ page }) => {
+    await page.goto('/')
+    const card = page.locator('[data-testid="section-system"]')
+    await card.locator('button[aria-label="Collapse section"]').click()
+    await expect(card).toHaveClass(/collapsed/)
 
-    // Click grid view.
-    await gridToggle.click();
-    await expect(page.getByTestId('file-browser')).toBeVisible();
-  });
-});
+    await page.reload()
+    await expect(page.locator('[data-testid="section-system"]')).toHaveClass(/collapsed/)
 
-// ===========================================================================
-// Suite 2 – File Upload
-// ===========================================================================
+    await page.locator('[data-testid="section-system"] button[aria-label="Expand section"]').click()
+    await expect(page.locator('[data-testid="section-system"]')).not.toHaveClass(/collapsed/)
+  })
+})
 
-test.describe('File Upload', () => {
-  test('upload button opens file picker', async ({ page }) => {
-    // Intercept the file-chooser event to confirm the button triggers it.
-    const [fileChooser] = await Promise.all([
-      page.waitForEvent('filechooser', { timeout: 5_000 }),
-      page.getByTestId('upload-button').click(),
-    ]);
-    expect(fileChooser).toBeTruthy();
-  });
+// ── files explorer ──────────────────────────────────────────────────
 
-  test('drag and drop file onto upload zone', async ({ page }) => {
-    // Synthesize drag events inside the browser context where DataTransfer
-    // is available (Playwright's dispatchEvent cannot serialize DataTransfer).
-    const uploadZone = page.getByTestId('upload-zone');
-    await expect(uploadZone).toBeVisible();
+test.describe('files explorer', () => {
+  test('navigates the folder tree by row, tree and breadcrumb', async ({ page }) => {
+    await page.goto('/')
+    const nested = uniq('nested.txt')
+    await uploadFile(page, nested, 'nested', 'e2e/inner')
+    await openSection(page, 'files')
+    await expect(page.locator('[data-testid="file-explorer"]')).toBeVisible()
 
-    await page.evaluate(() => {
-      const zone = document.querySelector('[data-testid="upload-zone"]');
-      if (!zone) return;
-      const dt = new DataTransfer();
-      zone.dispatchEvent(new DragEvent('dragenter', { dataTransfer: dt, bubbles: true }));
-      zone.dispatchEvent(new DragEvent('dragleave', { dataTransfer: dt, bubbles: true }));
-    });
-    await expect(uploadZone).toBeVisible();
-  });
+    await page.locator('.entry-row .entry-name', { hasText: 'e2e' }).first().click()
+    await expect(page).toHaveURL(/path=e2e/)
+    await expect(page.locator('.crumb')).toHaveText(['All Files', 'e2e'])
 
-  test('shows file in list after upload', async ({ page }) => {
-    const filename = `cfs_upload_test_${Date.now()}.txt`;
-    await uploadTestFile(page, filename, 'Hello CollectiveFS');
+    // The tree auto-expands to follow navigation.
+    await page.locator('.tree-row .tree-name', { hasText: 'inner' }).first().click()
+    await expect(page).toHaveURL(/path=e2e%2Finner/)
+    await expect(page.locator('.entry-row .entry-name', { hasText: nested })).toHaveCount(1)
 
-    // Reload or wait for WebSocket push; either way the file should appear.
-    await page.reload({ waitUntil: 'networkidle' });
-    await page.waitForSelector('[data-testid="file-browser"]', { timeout: 10_000 });
+    await page.locator('.crumb', { hasText: 'All Files' }).click()
+    await expect(page).not.toHaveURL(/path=/)
+  })
 
-    const card = page.locator('[data-testid="file-card"]', { hasText: filename });
-    await expect(card.first()).toBeVisible({ timeout: 10_000 });
-  });
+  test('switches between list and grid views', async ({ page }) => {
+    await page.goto('/')
+    await uploadFile(page, uniq('view-mode.txt'))
+    await openSection(page, 'files')
 
-  test('upload multiple files', async ({ page }) => {
-    const names = [
-      `multi_a_${Date.now()}.txt`,
-      `multi_b_${Date.now()}.txt`,
-      `multi_c_${Date.now()}.txt`,
-    ];
-    for (const name of names) {
-      await uploadTestFile(page, name, `content of ${name}`);
+    await expect(page.locator('.entry-list')).toBeVisible()
+    await page.locator('button[aria-label="Grid view"]').click()
+    await expect(page.locator('.entry-grid')).toBeVisible()
+    await expect(page.locator('.entry-tile').first()).toBeVisible()
+
+    await page.locator('button[aria-label="List view"]').click()
+    await expect(page.locator('.entry-list')).toBeVisible()
+  })
+
+  test('search reaches files in nested folders', async ({ page }) => {
+    await page.goto('/')
+    const needle = uniq('buried-needle.txt')
+    await uploadFile(page, needle, 'needle', 'deep/deeper')
+    await openSection(page, 'files')
+
+    // Not a direct child of the root, so only search should surface it.
+    await expect(page.locator('.entry-row .entry-name', { hasText: needle })).toHaveCount(0)
+    await page.locator('.explorer-search').fill(needle)
+    await expect(page.locator('.entry-row .entry-name', { hasText: needle })).toHaveCount(1)
+  })
+
+  test('shows shard health and a shard map for a stored file', async ({ page }) => {
+    await page.goto('/')
+    const mapped = uniq('shard-map.bin')
+    await uploadFile(page, mapped, 'x'.repeat(4096))
+    await openSection(page, 'files')
+
+    const row = page.locator('.entry-row', { has: page.locator('.entry-name', { hasText: mapped }) })
+    await expect(row).toBeVisible({ timeout: 15000 })
+    await expect(row.locator('.shard-bar')).toBeVisible()
+
+    await row.locator('.entry-name').click()
+    const detail = page.locator('[data-testid="file-detail"]')
+    await expect(detail).toBeVisible()
+    await expect(detail).toContainText('Shard map')
+    expect(await detail.locator('.shard-cell').count()).toBeGreaterThan(0)
+  })
+
+  test('renames and moves a file from the detail drawer', async ({ page }) => {
+    await page.goto('/')
+    const before = uniq('before-rename.txt')
+    const after = uniq('after-rename.txt')
+    const id = await uploadFile(page, before, 'rename me')
+    await apiJson(page, '/api/folders', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path: 'renamed-into' }),
+    })
+    await openSection(page, 'files')
+
+    await page.locator('.entry-row .entry-name', { hasText: before }).click()
+    const detail = page.locator('[data-testid="file-detail"]')
+    await detail.locator('input[aria-label="File name"]').fill(after)
+    await detail.locator('select[aria-label="Folder"]').selectOption('renamed-into')
+    await detail.locator('button', { hasText: 'Save' }).click()
+
+    await expect.poll(async () => (await apiJson(page, `/api/files/${id}`)).body).toMatchObject({
+      name: after,
+      folder: 'renamed-into',
+    })
+  })
+
+  test('creates a folder and removes it without deleting files', async ({ page }) => {
+    await page.goto('/')
+    const folder = uniq('doomed').replace('.', '-')
+    const id = await uploadFile(page, uniq('survives-folder-delete.txt'), 'keep me', folder)
+    await openSection(page, 'files')
+
+    const row = page.locator('.entry-row', { has: page.locator('.entry-name', { hasText: folder }) })
+    page.once('dialog', (dialog) => dialog.accept())
+    await row.locator(`button[aria-label="Remove folder ${folder}"]`).click()
+
+    // The folder is gone but the file survived, relocated to the root.
+    await expect.poll(async () => (await apiJson(page, `/api/files/${id}`)).body.folder).toBeNull()
+    await expect.poll(async () => (await apiJson(page, `/api/files/${id}`)).status).toBe(200)
+  })
+
+  test('deletes a file from the detail drawer', async ({ page }) => {
+    await page.goto('/')
+    const name = uniq('delete-me.txt')
+    const id = await uploadFile(page, name, 'temporary')
+    await openSection(page, 'files')
+
+    await page.locator('.entry-row .entry-name', { hasText: name }).click()
+    await page.locator('[data-testid="file-detail"] button', { hasText: 'Delete' }).click()
+    await expect.poll(async () => (await apiJson(page, `/api/files/${id}`)).status).toBe(404)
+  })
+})
+
+// ── system section ──────────────────────────────────────────────────
+
+test.describe('system & infrastructure', () => {
+  test('renders every telemetry panel', async ({ page }) => {
+    await openSection(page, 'system')
+    const panels = await page.locator('.skill-panel-block h3').allTextContents()
+    for (const expected of ['Storage & Quota', 'Compute', 'Memory', 'Network', 'Durability', 'Peers & Contracts']) {
+      expect(panels).toContain(expected)
     }
-
-    await page.reload({ waitUntil: 'networkidle' });
-    await page.waitForSelector('[data-testid="file-browser"]', { timeout: 10_000 });
-
-    for (const name of names) {
-      const card = page.locator('[data-testid="file-card"]', { hasText: name });
-      await expect(card.first()).toBeVisible({ timeout: 10_000 });
-    }
-  });
-
-  test('shows processing status during encoding', async ({ page }) => {
-    // Upload a file through the UI file-picker so we can see the intermediate
-    // "processing" badge before the backend finishes.
-    test.slow(); // encoding may take a moment
-    const filename = `processing_test_${Date.now()}.txt`;
-    const tmpPath = path.join(os.tmpdir(), filename);
-    fs.writeFileSync(tmpPath, 'x'.repeat(64), 'utf8');
-
-    const [fileChooser] = await Promise.all([
-      page.waitForEvent('filechooser', { timeout: 5_000 }),
-      page.getByTestId('upload-button').click(),
-    ]);
-    await fileChooser.setFiles(tmpPath);
-    fs.unlinkSync(tmpPath);
-
-    // Look for any card or status indicator that shows "processing" / "pending"
-    // within the first 8 seconds.
-    const processingVisible = await page
-      .locator('[data-testid="file-card"]', { hasText: filename })
-      .waitFor({ state: 'visible', timeout: 8_000 })
-      .then(() => true)
-      .catch(() => false);
-
-    // Even if encoding is very fast and goes straight to "complete", the card
-    // must be visible.
-    expect(processingVisible).toBe(true);
-  });
-
-  test('shows complete status after processing', async ({ page }) => {
-    test.slow();
-    const filename = `complete_test_${Date.now()}.txt`;
-    await uploadTestFile(page, filename, 'small payload');
-
-    await page.reload({ waitUntil: 'networkidle' });
-    await waitForFileProcessing(page, filename);
-
-    // The file card should still be visible once processing is done.
-    const card = page.locator('[data-testid="file-card"]', { hasText: filename });
-    await expect(card.first()).toBeVisible({ timeout: 15_000 });
-  });
-
-  test('shows toast notification on success', async ({ page }) => {
-    const filename = `toast_test_${Date.now()}.txt`;
-    const tmpPath = path.join(os.tmpdir(), filename);
-    fs.writeFileSync(tmpPath, 'toast content', 'utf8');
-
-    const [fileChooser] = await Promise.all([
-      page.waitForEvent('filechooser', { timeout: 5_000 }),
-      page.getByTestId('upload-button').click(),
-    ]);
-    await fileChooser.setFiles(tmpPath);
-    fs.unlinkSync(tmpPath);
-
-    // Many toast libraries render in a role="alert" or a class containing
-    // "toast". We look for any such element appearing within 8 s.
-    const toastLocator = page.locator('[role="alert"], .toast, .Toastify__toast, [class*="toast"]');
-    const appeared = await toastLocator
-      .waitFor({ state: 'visible', timeout: 8_000 })
-      .then(() => true)
-      .catch(() => false);
-
-    // If the app uses a different notification mechanism, skip the assertion
-    // but do not fail the test suite.  A visible notification is a bonus; the
-    // key assertion is that no JS error was thrown.
-    if (!appeared) {
-      test.info().annotations.push({
-        type: 'note',
-        description: 'Toast element not found – the app may use a different notification pattern.',
-      });
-    }
-  });
-
-  test('shows error notification on failed upload', async ({ page }) => {
-    // Attempt to POST an empty body to the upload endpoint and verify the UI
-    // shows an error (or at least does not crash).
-    await page.evaluate(async () => {
-      const formData = new FormData();
-      // No file appended – should result in a 422 / 400 from FastAPI.
-      await fetch('/api/files/upload', { method: 'POST', body: formData }).catch(() => {});
-    });
-
-    // The app should not crash; the main layout must still be visible.
-    await expect(page.getByTestId('file-browser')).toBeVisible();
-  });
-});
-
-// ===========================================================================
-// Suite 3 – File Browser
-// ===========================================================================
-
-test.describe('File Browser', () => {
-  test('shows empty state when no files', async ({ page }) => {
-    // Cleanup is done in afterEach; before any upload in this test the list
-    // should be empty.  The empty-state UI element may carry a class or text.
-    const browser = page.getByTestId('file-browser');
-    await expect(browser).toBeVisible();
-
-    const fileCards = page.locator('[data-testid="file-card"]');
-    const count = await fileCards.count();
-    if (count === 0) {
-      // Great – empty state shown.  Just assert the container is visible.
-      await expect(browser).toBeVisible();
-    } else {
-      // Files exist from a previous run; cleanup may not have finished yet.
-      // Skip further assertions in this edge case.
-    }
-  });
-
-  test('search filters files by name', async ({ page }) => {
-    // Upload two differently named files.
-    const nameA = `search_alpha_${Date.now()}.txt`;
-    const nameB = `search_beta_${Date.now()}.txt`;
-    await uploadTestFile(page, nameA, 'alpha');
-    await uploadTestFile(page, nameB, 'beta');
-
-    await page.reload({ waitUntil: 'networkidle' });
-    await page.waitForSelector('[data-testid="file-browser"]', { timeout: 10_000 });
-
-    const searchInput = page.getByTestId('search-input');
-    await searchInput.fill('alpha');
-    await page.waitForTimeout(400); // debounce
-
-    // Only the alpha file should be visible.
-    await expect(page.locator('[data-testid="file-card"]', { hasText: nameA }).first()).toBeVisible({
-      timeout: 5_000,
-    });
-    // Beta should be hidden (count = 0 or not visible).
-    const betaCards = page.locator('[data-testid="file-card"]', { hasText: nameB });
-    await expect(betaCards).toHaveCount(0, { timeout: 3_000 });
-  });
-
-  test('clear search shows all files', async ({ page }) => {
-    const nameA = `clrsrch_a_${Date.now()}.txt`;
-    const nameB = `clrsrch_b_${Date.now()}.txt`;
-    await uploadTestFile(page, nameA, 'aaa');
-    await uploadTestFile(page, nameB, 'bbb');
-
-    await page.reload({ waitUntil: 'networkidle' });
-    await page.waitForSelector('[data-testid="file-browser"]', { timeout: 10_000 });
-
-    const searchInput = page.getByTestId('search-input');
-    await searchInput.fill('clrsrch_a');
-    await page.waitForTimeout(400);
-
-    // Now clear the search.
-    await searchInput.fill('');
-    await page.waitForTimeout(400);
-
-    // Both files should be visible again.
-    await expect(page.locator('[data-testid="file-card"]', { hasText: nameA }).first()).toBeVisible({
-      timeout: 5_000,
-    });
-    await expect(page.locator('[data-testid="file-card"]', { hasText: nameB }).first()).toBeVisible({
-      timeout: 5_000,
-    });
-  });
-
-  test('grid view shows file cards with metadata', async ({ page }) => {
-    const filename = `grid_meta_${Date.now()}.txt`;
-    await uploadTestFile(page, filename, 'grid metadata content');
-
-    await page.reload({ waitUntil: 'networkidle' });
-    await page.waitForSelector('[data-testid="file-browser"]', { timeout: 10_000 });
-
-    // Switch to grid view.
-    await page.getByTestId('view-grid').click();
-
-    const card = page.locator('[data-testid="file-card"]', { hasText: filename }).first();
-    await expect(card).toBeVisible({ timeout: 8_000 });
-
-    // The card should contain the filename.
-    await expect(card).toContainText(filename);
-  });
-
-  test('list view shows files in table format', async ({ page }) => {
-    const filename = `list_row_${Date.now()}.txt`;
-    await uploadTestFile(page, filename, 'list row content');
-
-    await page.reload({ waitUntil: 'networkidle' });
-    await page.waitForSelector('[data-testid="file-browser"]', { timeout: 10_000 });
-
-    // Switch to list view.
-    await page.getByTestId('view-list').click();
-
-    const row = page.locator('[data-testid="file-list-row"]', { hasText: filename }).first();
-    await expect(row).toBeVisible({ timeout: 8_000 });
-    await expect(row).toContainText(filename);
-  });
-
-  test('clicking file card opens file details modal', async ({ page }) => {
-    const filename = `modal_test_${Date.now()}.txt`;
-    await uploadTestFile(page, filename, 'modal content');
-
-    await page.reload({ waitUntil: 'networkidle' });
-    await page.waitForSelector('[data-testid="file-browser"]', { timeout: 10_000 });
-
-    // Make sure grid view is active for file-card elements.
-    await page.getByTestId('view-grid').click();
-
-    const card = page.locator('[data-testid="file-card"]', { hasText: filename }).first();
-    await expect(card).toBeVisible({ timeout: 8_000 });
-    await card.click();
-
-    await expect(page.getByTestId('file-details-modal')).toBeVisible({ timeout: 5_000 });
-  });
-
-  test('file details shows chunk information', async ({ page }) => {
-    test.slow();
-    const filename = `chunk_detail_${Date.now()}.txt`;
-    await uploadTestFile(page, filename, 'chunk info content');
-
-    await page.reload({ waitUntil: 'networkidle' });
-    await page.waitForSelector('[data-testid="file-browser"]', { timeout: 10_000 });
-    await waitForFileProcessing(page, filename);
-
-    await page.getByTestId('view-grid').click();
-
-    const card = page.locator('[data-testid="file-card"]', { hasText: filename }).first();
-    await expect(card).toBeVisible({ timeout: 8_000 });
-    await card.click();
-
-    const modal = page.getByTestId('file-details-modal');
-    await expect(modal).toBeVisible({ timeout: 5_000 });
-
-    // Wait for modal content to load.
-    await page.waitForTimeout(1_000);
-    const modalText = await modal.textContent();
-    expect(modalText.length).toBeGreaterThan(0);
-  });
-
-  test('sorting files by name', async ({ page }) => {
-    const names = [
-      `zzz_sort_${Date.now()}.txt`,
-      `aaa_sort_${Date.now()}.txt`,
-      `mmm_sort_${Date.now()}.txt`,
-    ];
-    for (const name of names) {
-      await uploadTestFile(page, name, `content ${name}`);
-    }
-
-    await page.reload({ waitUntil: 'networkidle' });
-    await page.waitForSelector('[data-testid="file-browser"]', { timeout: 10_000 });
-
-    // Look for a sort-by-name control (button or select).  If found, click it.
-    const sortNameBtn = page.locator(
-      'button:has-text("Name"), [aria-label*="sort name" i], [data-testid*="sort-name"]',
-    ).first();
-    if (await sortNameBtn.count() > 0) {
-      await sortNameBtn.click();
-      await page.waitForTimeout(300);
-    }
-
-    // After sorting (or if no sort control), the file-browser should still be
-    // visible with all cards present.
-    await expect(page.getByTestId('file-browser')).toBeVisible();
-  });
-
-  test('sorting files by size', async ({ page }) => {
-    await uploadTestFile(page, `size_sort_small_${Date.now()}.txt`, 'hi');
-    await uploadTestFile(page, `size_sort_large_${Date.now()}.txt`, 'x'.repeat(80));
-
-    await page.reload({ waitUntil: 'networkidle' });
-    await page.waitForSelector('[data-testid="file-browser"]', { timeout: 10_000 });
-
-    const sortSizeBtn = page.locator(
-      'button:has-text("Size"), [aria-label*="sort size" i], [data-testid*="sort-size"]',
-    ).first();
-    if (await sortSizeBtn.count() > 0) {
-      await sortSizeBtn.click();
-      await page.waitForTimeout(300);
-    }
-
-    await expect(page.getByTestId('file-browser')).toBeVisible();
-  });
-
-  test('sorting files by date', async ({ page }) => {
-    await uploadTestFile(page, `date_sort_${Date.now()}.txt`, 'date content');
-
-    await page.reload({ waitUntil: 'networkidle' });
-    await page.waitForSelector('[data-testid="file-browser"]', { timeout: 10_000 });
-
-    const sortDateBtn = page.locator(
-      'button:has-text("Date"), [aria-label*="sort date" i], [data-testid*="sort-date"]',
-    ).first();
-    if (await sortDateBtn.count() > 0) {
-      await sortDateBtn.click();
-      await page.waitForTimeout(300);
-    }
-
-    await expect(page.getByTestId('file-browser')).toBeVisible();
-  });
-});
-
-// ===========================================================================
-// Suite 4 – File Operations
-// ===========================================================================
-
-test.describe('File Operations', () => {
-  test('download button triggers file download', async ({ page }) => {
-    const filename = `download_test_${Date.now()}.txt`;
-    await uploadTestFile(page, filename, 'download me');
-
-    await page.reload({ waitUntil: 'networkidle' });
-    await page.waitForSelector('[data-testid="file-browser"]', { timeout: 10_000 });
-
-    await page.getByTestId('view-grid').click();
-
-    const card = page.locator('[data-testid="file-card"]', { hasText: filename }).first();
-    await expect(card).toBeVisible({ timeout: 8_000 });
-
-    // Intercept the download event; a real download may not complete in tests.
-    const [download] = await Promise.all([
-      page.waitForEvent('download', { timeout: 8_000 }).catch(() => null),
-      card.locator('[data-testid="download-button"]').click(),
-    ]);
-
-    if (download) {
-      expect(download.suggestedFilename()).toBeTruthy();
-    } else {
-      // Download didn't fire as an event (inline href or fetch-based); that's
-      // acceptable as long as the page didn't crash.
-      await expect(page.getByTestId('file-browser')).toBeVisible();
-    }
-  });
-
-  test('delete button shows confirmation', async ({ page }) => {
-    const filename = `del_confirm_${Date.now()}.txt`;
-    await uploadTestFile(page, filename, 'to delete');
-
-    await page.reload({ waitUntil: 'networkidle' });
-    await page.waitForSelector('[data-testid="file-browser"]', { timeout: 10_000 });
-    await waitForFileProcessing(page, filename);
-
-    await page.getByTestId('view-grid').click();
-
-    const card = page.locator('[data-testid="file-card"]', { hasText: filename }).first();
-    await expect(card).toBeVisible({ timeout: 8_000 });
-
-    // Listen for native confirm dialog and auto-accept.
-    page.once('dialog', (dialog) => dialog.accept());
-    await card.locator('[data-testid="delete-button"]').click();
-
-    // Either a UI dialog appeared or the native confirm was handled.
-    // The key assertion is that the page did not crash.
-    await expect(page.getByTestId('file-browser')).toBeVisible();
-  });
-
-  test('confirms delete removes file from list', async ({ page }) => {
-    const filename = `del_remove_${Date.now()}.txt`;
-    await uploadTestFile(page, filename, 'delete for real');
-
-    await page.reload({ waitUntil: 'networkidle' });
-    await page.waitForSelector('[data-testid="file-browser"]', { timeout: 10_000 });
-
-    await page.getByTestId('view-grid').click();
-
-    const card = page.locator('[data-testid="file-card"]', { hasText: filename }).first();
-    await expect(card).toBeVisible({ timeout: 8_000 });
-
-    // Listen for a native dialog (window.confirm) and auto-accept.
-    page.once('dialog', (dialog) => dialog.accept());
-    await card.locator('[data-testid="delete-button"]').click();
-
-    // Accept a UI-level confirm button if present.
-    const confirmBtn = page.locator(
-      'button:has-text("Confirm"), button:has-text("Yes"), button:has-text("Delete")',
-    ).first();
-    if (await confirmBtn.count() > 0) {
-      await confirmBtn.click();
-    }
-
-    // The file card should disappear.
+    await expect(page.locator('.mini-stat', { hasText: 'NODE' })).toBeVisible()
+  })
+
+  test('charts fill in from live polling', async ({ page }) => {
+    await openSection(page, 'system')
+    // The poller samples every 5s and a chart needs two points to draw.
+    await expect(page.locator('.recharts-wrapper').first()).toBeVisible({ timeout: 30000 })
+    await expect.poll(async () => page.locator('.recharts-wrapper').count(), { timeout: 30000 }).toBeGreaterThanOrEqual(4)
+  })
+
+  test('quota and erasure state reflect the stored configuration', async ({ page }) => {
+    await page.goto('/')
+    await writeConfig(page, { 'erasure.data_shards': 10, 'erasure.parity_shards': 4 })
+    await openSection(page, 'system')
+    await expect(page.locator('.status-pill', { hasText: '10+4 erasure' })).toBeVisible()
+  })
+})
+
+// ── configuration ───────────────────────────────────────────────────
+
+test.describe('configuration', () => {
+  test('a quick control writes the change through', async ({ page }) => {
+    await openSection(page, 'system')
+    const field = page.locator('#storage\\.quota_bytes')
+    await field.fill('123GB')
+    await page.locator('.setting-cell', { has: field }).locator('button', { hasText: 'Set' }).click()
+
+    await expect.poll(async () => (await readConfig(page)).storage.quota_bytes).toBe(123 * 1024 ** 3)
+    await expect(page.locator('.toast')).toBeVisible()
+  })
+
+  test('an impossible quota is rejected with a reason', async ({ page }) => {
+    await page.goto('/')
+    const before = (await readConfig(page)).storage.quota_bytes
+    const result = await writeConfig(page, { 'storage.quota_bytes': '999PB' })
+
+    expect(result.status).toBe(400)
+    expect(result.body.detail).toContain('exceeds the filesystem size')
+    expect((await readConfig(page)).storage.quota_bytes).toBe(before)
+  })
+
+  test('an out-of-range shard count is rejected', async ({ page }) => {
+    await page.goto('/')
+    const result = await writeConfig(page, { 'erasure.parity_shards': 99 })
+    expect(result.status).toBe(400)
+    expect(result.body.detail).toContain('at most 32')
+  })
+
+  test('every change lands in the audit log', async ({ page }) => {
+    await page.goto('/')
+    await writeConfig(page, { 'contracts.max_peers': 41 })
+    const { body } = await apiJson(page, '/api/config/audit?limit=5')
+    const fields = body.entries.flatMap((entry) => entry.changes.map((change) => change.field))
+    expect(fields).toContain('contracts.max_peers')
+  })
+})
+
+// ── section chat ────────────────────────────────────────────────────
+
+test.describe('section chat', () => {
+  test('offers all four providers and marks the active one', async ({ page }) => {
+    await page.goto('/')
+    const card = page.locator('[data-testid="section-system"]')
+    await card.locator('button[aria-label^="Chat"]').click()
+
+    const buttons = card.locator('.provider-switch button')
+    await expect(buttons).toHaveCount(4)
+    await expect(buttons).toHaveText(['Codewhale', 'Claude Code', 'Codex', 'Built-in'])
+    await expect(card.locator('.provider-switch button.active')).toHaveCount(1)
+  })
+
+  test('switching provider persists to the node config', async ({ page }) => {
+    await page.goto('/')
+    const card = page.locator('[data-testid="section-system"]')
+    await card.locator('button[aria-label^="Chat"]').click()
+    await card.locator('.provider-switch button', { hasText: 'Built-in' }).click()
+
+    await expect.poll(async () => (await readConfig(page)).agent.provider).toBe('builtin')
+    await page.reload()
+    await page.locator('[data-testid="section-system"] button[aria-label^="Chat"]').click()
     await expect(
-      page.locator('[data-testid="file-card"]', { hasText: filename }),
-    ).toHaveCount(0, { timeout: 8_000 });
-  });
-
-  test('cancels delete keeps file in list', async ({ page }) => {
-    const filename = `del_cancel_${Date.now()}.txt`;
-    await uploadTestFile(page, filename, 'keep me');
-
-    await page.reload({ waitUntil: 'networkidle' });
-    await page.waitForSelector('[data-testid="file-browser"]', { timeout: 10_000 });
-
-    await page.getByTestId('view-grid').click();
-
-    const card = page.locator('[data-testid="file-card"]', { hasText: filename }).first();
-    await expect(card).toBeVisible({ timeout: 8_000 });
-
-    // Dismiss a native confirm dialog.
-    page.once('dialog', (dialog) => dialog.dismiss());
-    await card.locator('[data-testid="delete-button"]').click();
-
-    // Cancel a UI-level confirm if present.
-    const cancelBtn = page.locator(
-      'button:has-text("Cancel"), button:has-text("No")',
-    ).first();
-    if (await cancelBtn.count() > 0) {
-      await cancelBtn.click();
-    }
-
-    // The file should still be in the list.
-    await expect(
-      page.locator('[data-testid="file-card"]', { hasText: filename }).first(),
-    ).toBeVisible({ timeout: 5_000 });
-  });
-
-  test('file details modal shows download option', async ({ page }) => {
-    const filename = `modal_dl_${Date.now()}.txt`;
-    await uploadTestFile(page, filename, 'modal download');
-
-    await page.reload({ waitUntil: 'networkidle' });
-    await page.waitForSelector('[data-testid="file-browser"]', { timeout: 10_000 });
-
-    await page.getByTestId('view-grid').click();
-
-    const card = page.locator('[data-testid="file-card"]', { hasText: filename }).first();
-    await expect(card).toBeVisible({ timeout: 8_000 });
-    await card.click();
-
-    const modal = page.getByTestId('file-details-modal');
-    await expect(modal).toBeVisible({ timeout: 5_000 });
-
-    // The modal should contain a download button.
-    await expect(modal.locator('[data-testid="download-button"]')).toBeVisible({ timeout: 3_000 });
-  });
-});
-
-// ===========================================================================
-// Suite 5 – Drag and Drop
-// ===========================================================================
-
-test.describe('Drag and Drop', () => {
-  test('drag file over upload zone highlights it', async ({ page }) => {
-    const uploadZone = page.getByTestId('upload-zone');
-    await expect(uploadZone).toBeVisible();
-
-    // Synthesize drag events inside browser context where DataTransfer exists.
-    await page.evaluate(() => {
-      const zone = document.querySelector('[data-testid="upload-zone"]');
-      if (!zone) return;
-      const dt = new DataTransfer();
-      zone.dispatchEvent(new DragEvent('dragenter', { dataTransfer: dt, bubbles: true }));
-    });
-
-    await expect(uploadZone).toBeVisible();
-
-    await page.evaluate(() => {
-      const zone = document.querySelector('[data-testid="upload-zone"]');
-      if (!zone) return;
-      zone.dispatchEvent(new DragEvent('dragleave', { bubbles: true }));
-    });
-    await expect(uploadZone).toBeVisible();
-  });
-
-  test('dropping file uploads it', async ({ page }) => {
-    const uploadZone = page.getByTestId('upload-zone');
-    await expect(uploadZone).toBeVisible();
-
-    // Create a minimal File object in the browser context and dispatch a drop event.
-    const filename = `dnd_drop_${Date.now()}.txt`;
-    const uploaded = await page.evaluate(
-      async ({ fname, fzone }) => {
-        const content = new Uint8Array([72, 101, 108, 108, 111]); // "Hello"
-        const file = new File([content], fname, { type: 'text/plain' });
-
-        const dt = new DataTransfer();
-        dt.items.add(file);
-
-        const zone = document.querySelector(`[data-testid="${fzone}"]`);
-        if (!zone) return false;
-
-        zone.dispatchEvent(
-          new DragEvent('dragenter', { dataTransfer: dt, bubbles: true }),
-        );
-        zone.dispatchEvent(
-          new DragEvent('dragover', { dataTransfer: dt, bubbles: true }),
-        );
-        zone.dispatchEvent(
-          new DragEvent('drop', { dataTransfer: dt, bubbles: true }),
-        );
-        return true;
-      },
-      { fname: filename, fzone: 'upload-zone' },
-    );
-
-    expect(uploaded).toBe(true);
-
-    // Give the app a moment to react.
-    await page.waitForTimeout(1_000);
-    await expect(page.getByTestId('file-browser')).toBeVisible();
-  });
-
-  test('drag and drop shows file preview before upload', async ({ page }) => {
-    const uploadZone = page.getByTestId('upload-zone');
-    await expect(uploadZone).toBeVisible();
-
-    // Synthesize drag events inside browser context where DataTransfer exists.
-    await page.evaluate(() => {
-      const zone = document.querySelector('[data-testid="upload-zone"]');
-      if (!zone) return;
-      const dt = new DataTransfer();
-      zone.dispatchEvent(new DragEvent('dragenter', { dataTransfer: dt, bubbles: true }));
-      zone.dispatchEvent(new DragEvent('dragover', { dataTransfer: dt, bubbles: true }));
-    });
-
-    await expect(uploadZone).toBeVisible();
-
-    await page.evaluate(() => {
-      const zone = document.querySelector('[data-testid="upload-zone"]');
-      if (!zone) return;
-      zone.dispatchEvent(new DragEvent('dragleave', { bubbles: true }));
-    });
-  });
-
-  test('can drop multiple files at once', async ({ page }) => {
-    const uploadZone = page.getByTestId('upload-zone');
-    await expect(uploadZone).toBeVisible();
-
-    const dropped = await page.evaluate(async () => {
-      const dt = new DataTransfer();
-      dt.items.add(new File(['aaa'], 'multi_drop_1.txt', { type: 'text/plain' }));
-      dt.items.add(new File(['bbb'], 'multi_drop_2.txt', { type: 'text/plain' }));
-
-      const zone = document.querySelector('[data-testid="upload-zone"]');
-      if (!zone) return false;
-
-      zone.dispatchEvent(new DragEvent('dragenter', { dataTransfer: dt, bubbles: true }));
-      zone.dispatchEvent(new DragEvent('dragover', { dataTransfer: dt, bubbles: true }));
-      zone.dispatchEvent(new DragEvent('drop', { dataTransfer: dt, bubbles: true }));
-      return true;
-    });
-
-    expect(dropped).toBe(true);
-    await page.waitForTimeout(500);
-    await expect(page.getByTestId('file-browser')).toBeVisible();
-  });
-
-  test('drag file outside zone does not trigger upload', async ({ page }) => {
-    // Dispatch drop event on the body – not the upload zone.
-    const initialCards = await page.locator('[data-testid="file-card"]').count();
-
-    await page.evaluate(() => {
-      const dt = new DataTransfer();
-      dt.items.add(new File(['xxx'], 'outside_drop.txt', { type: 'text/plain' }));
-      document.body.dispatchEvent(new DragEvent('drop', { dataTransfer: dt, bubbles: true }));
-    });
-
-    await page.waitForTimeout(500);
-
-    const afterCards = await page.locator('[data-testid="file-card"]').count();
-    // The card count should not have increased due to a drop outside the zone.
-    expect(afterCards).toBe(initialCards);
-  });
-});
-
-// ===========================================================================
-// Suite 6 – Settings Panel
-// ===========================================================================
-
-test.describe('Settings Panel', () => {
-  test.beforeEach(async ({ page }) => {
-    // Navigate to Settings via the sidebar.
-    const settingsLink = page.locator('[data-testid="sidebar"] a, [data-testid="sidebar"] button', {
-      hasText: 'Settings',
-    }).first();
-    if (await settingsLink.count() > 0) {
-      await settingsLink.click();
-      await page.waitForTimeout(300);
-    }
-  });
-
-  test('navigates to settings from sidebar', async ({ page }) => {
-    const panel = page.getByTestId('settings-panel');
-    await expect(panel).toBeVisible({ timeout: 5_000 });
-  });
-
-  test('settings panel is visible', async ({ page }) => {
-    await expect(page.getByTestId('settings-panel')).toBeVisible({ timeout: 5_000 });
-  });
-
-  test('erasure coding sliders are interactive', async ({ page }) => {
-    const dataSlider = page.getByTestId('settings-erasure-data');
-    await expect(dataSlider).toBeVisible({ timeout: 5_000 });
-
-    const paritySlider = page.getByTestId('settings-erasure-parity');
-    await expect(paritySlider).toBeVisible({ timeout: 5_000 });
-
-    // Attempt to interact with the data slider by pressing ArrowRight.
-    await dataSlider.focus();
-    await page.keyboard.press('ArrowRight');
-    await expect(dataSlider).toBeVisible();
-  });
-
-  test('S3 settings section is visible', async ({ page }) => {
-    await expect(page.getByTestId('settings-s3-section')).toBeVisible({ timeout: 5_000 });
-  });
-
-  test('S3 settings inputs accept values', async ({ page }) => {
-    const s3Section = page.getByTestId('settings-s3-section');
-    await expect(s3Section).toBeVisible({ timeout: 5_000 });
-
-    // Fill any text inputs within the S3 section.
-    const inputs = s3Section.locator('input[type="text"], input:not([type])');
-    const inputCount = await inputs.count();
-    if (inputCount > 0) {
-      await inputs.first().fill('my-test-bucket');
-      const val = await inputs.first().inputValue();
-      expect(val).toBe('my-test-bucket');
-    }
-  });
-
-  test('local folder sync input accepts path', async ({ page }) => {
-    const pathInput = page.locator(
-      'input[placeholder*="path" i], input[placeholder*="folder" i], input[placeholder*="directory" i]',
-    ).first();
-    if (await pathInput.count() > 0) {
-      await pathInput.fill('/tmp/cfs-sync');
-      const val = await pathInput.inputValue();
-      expect(val).toBe('/tmp/cfs-sync');
-    } else {
-      // No local-folder input found; assert settings panel is still visible.
-      await expect(page.getByTestId('settings-panel')).toBeVisible();
-    }
-  });
-
-  test('URL import input accepts URL', async ({ page }) => {
-    const urlInput = page.locator(
-      'input[type="url"], input[placeholder*="url" i], input[placeholder*="http" i]',
-    ).first();
-    if (await urlInput.count() > 0) {
-      await urlInput.fill('https://example.com/file.txt');
-      const val = await urlInput.inputValue();
-      expect(val).toBe('https://example.com/file.txt');
-    } else {
-      await expect(page.getByTestId('settings-panel')).toBeVisible();
-    }
-  });
-});
-
-// ===========================================================================
-// Suite 7 – Real-time Updates (WebSocket)
-// ===========================================================================
-
-test.describe('Real-time Updates', () => {
-  test('status bar shows connected state', async ({ page }) => {
-    const statusBar = page.getByTestId('status-bar');
-    await expect(statusBar).toBeVisible();
-    // A "connected" indicator is often green or labelled.
-    const text = await statusBar.textContent();
-    expect(text).toBeTruthy();
-  });
-
-  test('file status updates in real-time after upload', async ({ page }) => {
-    test.slow();
-    const filename = `ws_update_${Date.now()}.txt`;
-    await uploadTestFile(page, filename, 'realtime content');
-
-    // After uploading via the API, a WebSocket push should update the UI
-    // without a page reload. Wait up to 10 s for the card to appear.
-    await waitForFileProcessing(page, filename, 10_000);
-
-    const card = page.locator('[data-testid="file-card"]', { hasText: filename });
-    const cardCount = await card.count();
-
-    if (cardCount === 0) {
-      // Fall back to a reload if WebSocket push did not trigger a re-render.
-      await page.reload({ waitUntil: 'networkidle' });
-      await page.waitForSelector('[data-testid="file-browser"]', { timeout: 10_000 });
-    }
-
-    await expect(
-      page.locator('[data-testid="file-card"]', { hasText: filename }).first(),
-    ).toBeVisible({ timeout: 8_000 });
-  });
-
-  test('file count updates without page reload', async ({ page }) => {
-    test.slow();
-
-    // Read initial stats.
-    const initialCount = await page.evaluate(async () => {
-      const r = await fetch('/api/stats');
-      if (!r.ok) return -1;
-      const d = await r.json();
-      return d.total_files ?? 0;
-    });
-
-    const filename = `count_update_${Date.now()}.txt`;
-    await uploadTestFile(page, filename, 'count test');
-
-    // Give the WebSocket or polling interval time to update.
-    await page.waitForTimeout(3_000);
-
-    const newCount = await page.evaluate(async () => {
-      const r = await fetch('/api/stats');
-      if (!r.ok) return -1;
-      const d = await r.json();
-      return d.total_files ?? 0;
-    });
-
-    if (initialCount >= 0 && newCount >= 0) {
-      expect(newCount).toBeGreaterThanOrEqual(initialCount);
-    }
-  });
-});
-
-// ===========================================================================
-// Suite 8 – Service Integrations
-// ===========================================================================
-
-test.describe('Service Integrations', () => {
-  test.beforeEach(async ({ page }) => {
-    // Navigate to Settings where integration forms live.
-    const settingsLink = page.locator('[data-testid="sidebar"] a, [data-testid="sidebar"] button', {
-      hasText: 'Settings',
-    }).first();
-    if (await settingsLink.count() > 0) {
-      await settingsLink.click();
-      await page.waitForTimeout(300);
-    }
-  });
-
-  test('S3 configuration form is present', async ({ page }) => {
-    await expect(page.getByTestId('settings-s3-section')).toBeVisible({ timeout: 5_000 });
-  });
-
-  test('S3 form validates required fields', async ({ page }) => {
-    const s3Section = page.getByTestId('settings-s3-section');
-    await expect(s3Section).toBeVisible({ timeout: 5_000 });
-
-    // Try to submit the S3 form with empty fields.
-    const submitBtn = s3Section.locator(
-      'button[type="submit"], button:has-text("Save"), button:has-text("Connect")',
-    ).first();
-
-    if (await submitBtn.count() > 0) {
-      await submitBtn.click();
-      // Validation errors or the form should still be visible (not crashed).
-      await expect(page.getByTestId('settings-panel')).toBeVisible({ timeout: 3_000 });
-    } else {
-      await expect(s3Section).toBeVisible();
-    }
-  });
-
-  test('URL import form accepts valid URLs', async ({ page }) => {
-    const urlInput = page.locator(
-      'input[type="url"], input[placeholder*="url" i], input[placeholder*="http" i]',
-    ).first();
-    if (await urlInput.count() > 0) {
-      await urlInput.fill('https://files.example.com/data.bin');
-      expect(await urlInput.inputValue()).toBe('https://files.example.com/data.bin');
-    } else {
-      await expect(page.getByTestId('settings-panel')).toBeVisible();
-    }
-  });
-
-  test('local folder sync button is clickable', async ({ page }) => {
-    const syncBtn = page.locator(
-      'button:has-text("Sync"), button:has-text("Browse"), button[aria-label*="sync" i]',
-    ).first();
-    if (await syncBtn.count() > 0) {
-      // Click without expecting a dialog – just assert no crash.
-      await syncBtn.click({ force: true });
-      await expect(page.getByTestId('settings-panel')).toBeVisible({ timeout: 3_000 });
-    } else {
-      await expect(page.getByTestId('settings-panel')).toBeVisible();
-    }
-  });
-});
-
-// ===========================================================================
-// Suite 9 – Download Integrity (file comes back complete)
-// ===========================================================================
-
-test.describe('Download Integrity', () => {
-  test('download returns complete file matching original content', async ({ page }) => {
-    test.slow();
-    const filename = `integrity_${Date.now()}.bin`;
-    // Create known binary content (256 bytes of deterministic data)
-    const content = Buffer.alloc(256);
-    for (let i = 0; i < 256; i++) content[i] = i;
-    const originalHash = crypto.createHash('sha256').update(content).digest('hex');
-
-    // Upload via API
-    const fileId = await page.evaluate(
-      async ({ fname, bytes }) => {
-        const arr = new Uint8Array(bytes);
-        const blob = new Blob([arr], { type: 'application/octet-stream' });
-        const formData = new FormData();
-        formData.append('file', blob, fname);
-        const resp = await fetch('/api/files/upload', {
-          method: 'POST',
-          body: formData,
-        });
-        const json = await resp.json();
-        return json.id;
-      },
-      { fname: filename, bytes: Array.from(content) },
-    );
-
-    // Wait for processing to complete
-    const deadline = Date.now() + 30_000;
-    while (Date.now() < deadline) {
-      const status = await page.evaluate(async (id) => {
-        const r = await fetch(`/api/files/${id}`);
-        if (!r.ok) return 'unknown';
-        const d = await r.json();
-        return d.status;
-      }, fileId);
-      if (status === 'stored' || status === 'complete') break;
-      await page.waitForTimeout(500);
-    }
-
-    // Download via API and verify content hash
-    const downloadHash = await page.evaluate(async (id) => {
-      const resp = await fetch(`/api/files/${id}/download`);
-      if (!resp.ok) return `error:${resp.status}`;
-      const buf = await resp.arrayBuffer();
-      // Compute SHA-256 using Web Crypto API (window.crypto to avoid Node.js capture)
-      const hashBuf = await window.crypto.subtle.digest('SHA-256', buf);
-      const hashArr = Array.from(new Uint8Array(hashBuf));
-      return hashArr.map((b) => b.toString(16).padStart(2, '0')).join('');
-    }, fileId);
-
-    expect(downloadHash).toBe(originalHash);
-  });
-
-  test('download via UI button produces complete file', async ({ page }) => {
-    test.slow();
-    const filename = `ui_dl_${Date.now()}.txt`;
-    const content = 'CollectiveFS download integrity verification payload ' + Date.now();
-    const fileId = await uploadTestFile(page, filename, content);
-
-    // Wait for processing
-    const deadline = Date.now() + 30_000;
-    while (Date.now() < deadline) {
-      const status = await page.evaluate(async (id) => {
-        const r = await fetch(`/api/files/${id}`);
-        if (!r.ok) return 'unknown';
-        return (await r.json()).status;
-      }, fileId);
-      if (status === 'stored' || status === 'complete') break;
-      await page.waitForTimeout(500);
-    }
-
-    // Verify download content via API fetch (the UI uses createObjectURL
-    // which doesn't always trigger Playwright's download event)
-    const downloadedContent = await page.evaluate(async (id) => {
-      const resp = await fetch(`/api/files/${id}/download`);
-      if (!resp.ok) return `error:${resp.status}`;
-      return await resp.text();
-    }, fileId);
-
-    expect(downloadedContent).toBe(content);
-
-    // Also verify the UI download button is clickable without crash
-    await page.reload({ waitUntil: 'networkidle' });
-    await page.waitForSelector('[data-testid="file-browser"]', { timeout: 10_000 });
-    await waitForFileProcessing(page, filename);
-    await page.getByTestId('view-grid').click();
-
-    const card = page.locator('[data-testid="file-card"]', { hasText: filename }).first();
-    await expect(card).toBeVisible({ timeout: 8_000 });
-    await card.locator('[data-testid="download-button"]').click();
-    // Page should not crash
-    await expect(page.getByTestId('file-browser')).toBeVisible();
-  });
-
-  test('upload and download bunny video with hash verification', async ({ page }) => {
-    test.slow();
-
-    // Check if bunny video exists
-    const bunnyPath = path.resolve(__dirname, '..', 'fixtures', 'bunny_1080p.mp4');
-    if (!fs.existsSync(bunnyPath)) {
-      test.skip();
-      return;
-    }
-
-    const bunnyData = fs.readFileSync(bunnyPath);
-    const originalHash = crypto.createHash('sha256').update(bunnyData).digest('hex');
-    const originalSize = bunnyData.length;
-
-    // Upload bunny video via Node.js HTTP (too large for page.evaluate)
-    const http = await import('http');
-    const boundary = '----CFS' + Date.now();
-    const header = Buffer.from(
-      `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="bunny_1080p.mp4"\r\nContent-Type: video/mp4\r\n\r\n`,
-    );
-    const footer = Buffer.from(`\r\n--${boundary}--\r\n`);
-    const body = Buffer.concat([header, bunnyData, footer]);
-
-    const uploadResult = await new Promise((resolve, reject) => {
-      const req = http.request(
-        {
-          hostname: 'localhost',
-          port: 8000,
-          path: '/api/files/upload',
-          method: 'POST',
-          headers: {
-            'Content-Type': `multipart/form-data; boundary=${boundary}`,
-            'Content-Length': body.length,
-          },
-        },
-        (res) => {
-          let data = '';
-          res.on('data', (chunk) => (data += chunk));
-          res.on('end', () => resolve(JSON.parse(data)));
-        },
-      );
-      req.on('error', reject);
-      req.write(body);
-      req.end();
-    });
-
-    const bunnyFileId = uploadResult.id;
-    expect(bunnyFileId).toBeTruthy();
-
-    // Wait for processing
-    const deadline = Date.now() + 60_000;
-    while (Date.now() < deadline) {
-      const status = await page.evaluate(async (id) => {
-        const r = await fetch(`/api/files/${id}`);
-        if (!r.ok) return 'unknown';
-        return (await r.json()).status;
-      }, bunnyFileId);
-      if (status === 'stored' || status === 'complete') break;
-      await page.waitForTimeout(1_000);
-    }
-
-    // Verify file appears in UI
-    await page.reload({ waitUntil: 'networkidle' });
-    await page.waitForSelector('[data-testid="file-browser"]', { timeout: 10_000 });
-    const bunnyCard = page.locator('[data-testid="file-card"]', { hasText: 'bunny_1080p.mp4' });
-    await expect(bunnyCard.first()).toBeVisible({ timeout: 15_000 });
-
-    // Download and verify SHA-256 hash matches original
-    const downloadResp = await page.evaluate(async (id) => {
-      const resp = await fetch(`/api/files/${id}/download`);
-      if (!resp.ok) return { error: resp.status };
-      const buf = await resp.arrayBuffer();
-      const hashBuf = await window.crypto.subtle.digest('SHA-256', buf);
-      const hashArr = Array.from(new Uint8Array(hashBuf));
-      return {
-        size: buf.byteLength,
-        hash: hashArr.map((b) => b.toString(16).padStart(2, '0')).join(''),
-      };
-    }, bunnyFileId);
-
-    expect(downloadResp.error).toBeUndefined();
-    expect(downloadResp.size).toBe(originalSize);
-    expect(downloadResp.hash).toBe(originalHash);
-  });
-});
-
-// ===========================================================================
-// Suite 10 – Shard and Peer Visualization
-// ===========================================================================
-
-test.describe('Shard and Peer Visualization', () => {
-  test('file details modal shows shard distribution bar', async ({ page }) => {
-    test.slow();
-    const filename = `shard_viz_${Date.now()}.bin`;
-    const content = 'x'.repeat(512);
-    await uploadTestFile(page, filename, content);
-
-    await page.reload({ waitUntil: 'networkidle' });
-    await page.waitForSelector('[data-testid="file-browser"]', { timeout: 10_000 });
-    await waitForFileProcessing(page, filename);
-
-    await page.getByTestId('view-grid').click();
-    const card = page.locator('[data-testid="file-card"]', { hasText: filename }).first();
-    await expect(card).toBeVisible({ timeout: 8_000 });
-    await card.click();
-
-    const modal = page.getByTestId('file-details-modal');
-    await expect(modal).toBeVisible({ timeout: 5_000 });
-
-    // Shard overview section should exist
-    await expect(modal.getByTestId('shard-overview')).toBeVisible({ timeout: 5_000 });
-    // Visual shard bar should be present
-    await expect(modal.getByTestId('shard-bar')).toBeVisible();
-    // Shard table should be present
-    await expect(modal.getByTestId('shard-table')).toBeVisible();
-  });
-
-  test('shard table shows correct number of shards', async ({ page }) => {
-    test.slow();
-    const filename = `shard_count_${Date.now()}.bin`;
-    const fileId = await uploadTestFile(page, filename, 'shard count test data');
-
-    // Wait for encoding to complete via API
-    const deadline = Date.now() + 30_000;
-    while (Date.now() < deadline) {
-      const status = await page.evaluate(async (id) => {
-        const r = await fetch(`/api/files/${id}`);
-        return r.ok ? (await r.json()).status : 'unknown';
-      }, fileId);
-      if (status === 'stored' || status === 'complete') break;
-      await page.waitForTimeout(500);
-    }
-
-    await page.reload({ waitUntil: 'networkidle' });
-    await page.waitForSelector('[data-testid="file-browser"]', { timeout: 10_000 });
-
-    await page.getByTestId('view-grid').click();
-    const card = page.locator('[data-testid="file-card"]', { hasText: filename }).first();
-    await expect(card).toBeVisible({ timeout: 8_000 });
-    await card.click();
-
-    const modal = page.getByTestId('file-details-modal');
-    await expect(modal).toBeVisible({ timeout: 5_000 });
-    await page.waitForTimeout(500); // let shard data load
-
-    // Count shard rows in the table
-    const shardRows = modal.locator('[data-testid^="shard-row-"]');
-    const rowCount = await shardRows.count();
-    expect(rowCount).toBeGreaterThan(0);
-
-    // Verify data/parity labels exist
-    const modalText = await modal.textContent();
-    expect(modalText).toContain('DATA');
-    expect(modalText).toContain('PARITY');
-  });
-
-  test('shard table shows availability status for each shard', async ({ page }) => {
-    test.slow();
-    const filename = `shard_status_${Date.now()}.bin`;
-    const fileId = await uploadTestFile(page, filename, 'availability status test');
-
-    // Wait for encoding to complete
-    const deadline = Date.now() + 30_000;
-    while (Date.now() < deadline) {
-      const status = await page.evaluate(async (id) => {
-        const r = await fetch(`/api/files/${id}`);
-        return r.ok ? (await r.json()).status : 'unknown';
-      }, fileId);
-      if (status === 'stored' || status === 'complete') break;
-      await page.waitForTimeout(500);
-    }
-
-    await page.reload({ waitUntil: 'networkidle' });
-    await page.waitForSelector('[data-testid="file-browser"]', { timeout: 10_000 });
-
-    await page.getByTestId('view-grid').click();
-    const card = page.locator('[data-testid="file-card"]', { hasText: filename }).first();
-    await expect(card).toBeVisible({ timeout: 8_000 });
-    await card.click();
-
-    const modal = page.getByTestId('file-details-modal');
-    await expect(modal).toBeVisible({ timeout: 5_000 });
-
-    // Wait for shard table to load
-    await expect(modal.getByTestId('shard-table')).toBeVisible({ timeout: 8_000 });
-
-    // Each shard row should show "Available" status
-    const modalText = await modal.textContent();
-    expect(modalText).toContain('Available');
-  });
-
-  test('shard table shows peer assignments', async ({ page }) => {
-    test.slow();
-    const filename = `shard_peers_${Date.now()}.bin`;
-    const fileId = await uploadTestFile(page, filename, 'peer assignment test');
-
-    // Wait for encoding to complete
-    const deadline = Date.now() + 30_000;
-    while (Date.now() < deadline) {
-      const status = await page.evaluate(async (id) => {
-        const r = await fetch(`/api/files/${id}`);
-        return r.ok ? (await r.json()).status : 'unknown';
-      }, fileId);
-      if (status === 'stored' || status === 'complete') break;
-      await page.waitForTimeout(500);
-    }
-
-    await page.reload({ waitUntil: 'networkidle' });
-    await page.waitForSelector('[data-testid="file-browser"]', { timeout: 10_000 });
-
-    await page.getByTestId('view-grid').click();
-    const card = page.locator('[data-testid="file-card"]', { hasText: filename }).first();
-    await expect(card).toBeVisible({ timeout: 8_000 });
-    await card.click();
-
-    const modal = page.getByTestId('file-details-modal');
-    await expect(modal).toBeVisible({ timeout: 5_000 });
-
-    // Wait for shard table to load
-    await expect(modal.getByTestId('shard-table')).toBeVisible({ timeout: 8_000 });
-
-    // Peer columns should have values like "local-1", "local-2", etc.
-    const modalText = await modal.textContent();
-    expect(modalText).toContain('local-');
-  });
-
-  test('shard bar blocks show data vs parity coloring', async ({ page }) => {
-    test.slow();
-    const filename = `shard_colors_${Date.now()}.bin`;
-    await uploadTestFile(page, filename, 'color test data');
-
-    await page.reload({ waitUntil: 'networkidle' });
-    await page.waitForSelector('[data-testid="file-browser"]', { timeout: 10_000 });
-    await waitForFileProcessing(page, filename);
-
-    await page.getByTestId('view-grid').click();
-    const card = page.locator('[data-testid="file-card"]', { hasText: filename }).first();
-    await expect(card).toBeVisible({ timeout: 8_000 });
-    await card.click();
-
-    const modal = page.getByTestId('file-details-modal');
-    await expect(modal).toBeVisible({ timeout: 5_000 });
-
-    // First shard block (data) should exist
-    await expect(modal.getByTestId('shard-block-0')).toBeVisible();
-    // Shard blocks should have title attributes with type info
-    const title0 = await modal.getByTestId('shard-block-0').getAttribute('title');
-    expect(title0).toContain('Data');
-  });
-
-  test('bunny video shows shard details with sizes', async ({ page }) => {
-    test.slow();
-
-    const bunnyPath = path.resolve(__dirname, '..', 'fixtures', 'bunny_1080p.mp4');
-    if (!fs.existsSync(bunnyPath)) {
-      test.skip();
-      return;
-    }
-
-    // Upload bunny via Node.js HTTP (too large for page.evaluate)
-    const bunnyData = fs.readFileSync(bunnyPath);
-    const http = await import('http');
-    const boundary = '----CFS' + Date.now();
-    const header = Buffer.from(
-      `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="bunny_1080p.mp4"\r\nContent-Type: video/mp4\r\n\r\n`,
-    );
-    const footer = Buffer.from(`\r\n--${boundary}--\r\n`);
-    const body = Buffer.concat([header, bunnyData, footer]);
-
-    const uploadResult = await new Promise((resolve, reject) => {
-      const req = http.request(
-        {
-          hostname: 'localhost',
-          port: 8000,
-          path: '/api/files/upload',
-          method: 'POST',
-          headers: {
-            'Content-Type': `multipart/form-data; boundary=${boundary}`,
-            'Content-Length': body.length,
-          },
-        },
-        (res) => {
-          let data = '';
-          res.on('data', (chunk) => (data += chunk));
-          res.on('end', () => resolve(JSON.parse(data)));
-        },
-      );
-      req.on('error', reject);
-      req.write(body);
-      req.end();
-    });
-
-    const fileId = uploadResult.id;
-
-    // Wait for processing
-    const deadline = Date.now() + 60_000;
-    while (Date.now() < deadline) {
-      const status = await page.evaluate(async (id) => {
-        const r = await fetch(`/api/files/${id}`);
-        return r.ok ? (await r.json()).status : 'unknown';
-      }, fileId);
-      if (status === 'stored' || status === 'complete') break;
-      await page.waitForTimeout(1_000);
-    }
-
-    await page.reload({ waitUntil: 'networkidle' });
-    await page.waitForSelector('[data-testid="file-browser"]', { timeout: 10_000 });
-
-    await page.getByTestId('view-grid').click();
-    const card = page.locator('[data-testid="file-card"]', { hasText: 'bunny_1080p.mp4' }).first();
-    await expect(card).toBeVisible({ timeout: 15_000 });
-    await card.click();
-
-    const modal = page.getByTestId('file-details-modal');
-    await expect(modal).toBeVisible({ timeout: 5_000 });
-
-    // Verify shard overview
-    await expect(modal.getByTestId('shard-overview')).toBeVisible();
-    await expect(modal.getByTestId('shard-bar')).toBeVisible();
-    await expect(modal.getByTestId('shard-table')).toBeVisible();
-
-    // Should show 12+ shard rows (8 data + 4 parity + .size file)
-    const shardRows = modal.locator('[data-testid^="shard-row-"]');
-    expect(await shardRows.count()).toBeGreaterThanOrEqual(12);
-
-    // Shard table should show actual sizes (not "—")
-    const modalText = await modal.textContent();
-    // Size values like "2.66 MB" should appear for the bunny video shards
-    expect(modalText).toMatch(/\d+(\.\d+)?\s*(KB|MB|GB|B)/);
-  });
-});
+      page.locator('[data-testid="section-system"] .provider-switch button.active'),
+    ).toHaveText('Built-in')
+  })
+
+  test('changes allocated storage from a plain-language instruction', async ({ page }) => {
+    await page.goto('/')
+    await writeConfig(page, { 'storage.quota_bytes': '40GB' })
+
+    const reply = await chat(page, 'system', 'allocate 90GB to the collective')
+    expect(reply.error).toBeNull()
+    expect(reply.applied).toHaveLength(1)
+    expect(reply.applied[0]).toMatchObject({
+      field: 'storage.quota_bytes',
+      before: 40 * 1024 ** 3,
+      after: 90 * 1024 ** 3,
+    })
+    expect((await readConfig(page)).storage.quota_bytes).toBe(90 * 1024 ** 3)
+  })
+
+  test('adjusts erasure parameters and reports the new fault budget', async ({ page }) => {
+    await page.goto('/')
+    await writeConfig(page, { 'erasure.parity_shards': 4 })
+
+    const reply = await chat(page, 'system', 'set parity shards to 7')
+    expect(reply.applied[0]).toMatchObject({ field: 'erasure.parity_shards', after: 7 })
+    expect(reply.reply).toContain('Existing files keep the layout')
+    expect((await readConfig(page)).erasure.parity_shards).toBe(7)
+  })
+
+  test('applies a relative change against the current value', async ({ page }) => {
+    await page.goto('/')
+    await writeConfig(page, { 'storage.quota_bytes': '50GB' })
+
+    const reply = await chat(page, 'system', 'increase space by 10GB')
+    expect(reply.applied[0].after).toBe(60 * 1024 ** 3)
+  })
+
+  test('toggles a boolean setting', async ({ page }) => {
+    await page.goto('/')
+    await writeConfig(page, { 'contracts.challenges_enabled': true })
+
+    const reply = await chat(page, 'system', 'disable challenges')
+    expect(reply.applied[0]).toMatchObject({ field: 'contracts.challenges_enabled', after: false })
+  })
+
+  test('refuses an invalid change and leaves config untouched', async ({ page }) => {
+    await page.goto('/')
+    const before = (await readConfig(page)).storage.quota_bytes
+
+    const reply = await chat(page, 'system', 'allocate 900TB to the collective')
+    expect(reply.applied).toHaveLength(0)
+    expect(reply.error).toContain('exceeds the filesystem size')
+    expect(reply.reply).toContain('Not applied')
+    expect((await readConfig(page)).storage.quota_bytes).toBe(before)
+  })
+
+  test('answers a question without changing anything', async ({ page }) => {
+    await page.goto('/')
+    const before = await readConfig(page)
+
+    const reply = await chat(page, 'system', 'how much headroom is left?')
+    expect(reply.applied).toHaveLength(0)
+    expect(reply.reply).toContain('Erasure coding')
+    expect(await readConfig(page)).toEqual(before)
+  })
+
+  test('the UI renders an applied change inline in the chat log', async ({ page }) => {
+    await page.goto('/')
+    await writeConfig(page, { 'agent.provider': 'builtin', 'contracts.max_peers': 12 })
+
+    const card = page.locator('[data-testid="section-system"]')
+    await card.locator('button[aria-label^="Chat"]').click()
+    await card.locator('input[aria-label^="Ask"]').fill('set max peers to 24')
+    await card.locator('button[aria-label="Send message"]').click()
+
+    await expect(card.locator('.chat-applied-title')).toHaveText('Configuration applied', { timeout: 30000 })
+    await expect(card.locator('.chat-applied-row code')).toHaveText('contracts.max_peers')
+    await expect(card.locator('.chat-applied-row .after')).toHaveText('24')
+    expect((await readConfig(page)).contracts.max_peers).toBe(24)
+  })
+})

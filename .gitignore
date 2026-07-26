@@ -31,9 +31,18 @@ tests/e2e/report/
 .testvenv/
 
 # Node
+node_modules/
 ui/node_modules/
 ui/dist/
 
 # OS
 .DS_Store
 Thumbs.db
+
+# Local secrets for docker compose (provider API keys)
+.env
+.env.local
+
+# Playwright scratch node storage
+.pw-collective/
+test-results/

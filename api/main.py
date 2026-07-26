@@ -16,7 +16,9 @@ from fastapi import (
     BackgroundTasks,
     FastAPI,
     File,
+    Form,
     HTTPException,
+    Query,
     Request,
     UploadFile,
     WebSocket,
@@ -43,6 +45,9 @@ from api.models import (
     UploadResponse,
 )
 from api.contracts import ContractManager, TIER_CONFIGS, respond_to_challenge
+from api import agent_service, files_service, system_service
+from api.config_service import ConfigError, ConfigStore, apply_updates, describe_settings
+from api.files_service import FileTreeError, FolderStore
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -82,6 +87,20 @@ for _purl in [u.strip() for u in _PEER_URLS_RAW.split(",") if u.strip()]:
 
 # Contract manager
 contract_mgr = ContractManager(COLLECTIVE_PATH, NODE_ID)
+
+# Runtime configuration (quota, erasure parameters, agent provider) and the
+# explicit-folder index backing the Files explorer.
+config_store = ConfigStore(COLLECTIVE_PATH)
+folder_store = FolderStore(COLLECTIVE_PATH)
+
+
+def _erasure_params() -> tuple[int, int]:
+    """Shard counts for the *next* upload, from config with env as the seed."""
+    cfg = config_store.load().get("erasure", {})
+    return (
+        int(cfg.get("data_shards") or ENCODER_DATA_SHARDS),
+        int(cfg.get("parity_shards") or ENCODER_PAR_SHARDS),
+    )
 
 # ---------------------------------------------------------------------------
 # App
@@ -198,16 +217,19 @@ async def _broadcast_status(update: Dict[str, Any]) -> None:
 # Background pipeline
 # ---------------------------------------------------------------------------
 
-def _run_encode_pipeline(file_id: str, src_path: str, file_name: str) -> None:
+def _run_encode_pipeline(
+    file_id: str, src_path: str, file_name: str, folder: str = ""
+) -> None:
     """Synchronous encode + encrypt pipeline run in a thread pool executor."""
     try:
+        data_shards, parity_shards = _erasure_params()
         # Update status: processing
         _file_statuses[file_id] = {
             "type": "status",
             "file_id": file_id,
             "status": "processing",
             "progress": 0.1,
-            "message": "Encoding with Reed-Solomon…",
+            "message": f"Encoding with Reed-Solomon {data_shards}+{parity_shards}…",
         }
 
         # Attempt to run the encoder binary if it exists and is executable
@@ -218,8 +240,8 @@ def _run_encode_pipeline(file_id: str, src_path: str, file_name: str) -> None:
             result = subprocess.run(
                 [
                     str(ENCODER_PATH),
-                    "--data", str(ENCODER_DATA_SHARDS),
-                    "--par",  str(ENCODER_PAR_SHARDS),
+                    "--data", str(data_shards),
+                    "--par",  str(parity_shards),
                     "--out",  out_dir,
                     src_path,
                 ],
@@ -287,7 +309,9 @@ def _run_encode_pipeline(file_id: str, src_path: str, file_name: str) -> None:
             "chunks": len(chunks),
             "created_at": datetime.now(timezone.utc).isoformat(),
             "status": "stored",
-            "folder": None,
+            "folder": folder or None,
+            "data_shards": data_shards,
+            "parity_shards": parity_shards,
             "chunk_list": chunks,
         }
         _write_tree_json(file_id, metadata)
@@ -319,12 +343,12 @@ def _run_encode_pipeline(file_id: str, src_path: str, file_name: str) -> None:
 
 
 async def _async_encode_pipeline(
-    file_id: str, src_path: str, file_name: str
+    file_id: str, src_path: str, file_name: str, folder: str = ""
 ) -> None:
     """Run the encode pipeline in a thread executor, then broadcast result."""
     loop = asyncio.get_event_loop()
     await loop.run_in_executor(
-        None, _run_encode_pipeline, file_id, src_path, file_name
+        None, _run_encode_pipeline, file_id, src_path, file_name, folder
     )
     if file_id in _file_statuses:
         await _broadcast_status(_file_statuses[file_id])
@@ -363,6 +387,93 @@ async def list_files() -> List[FileMetadata]:
     return files
 
 
+@app.get("/api/files/tree")
+async def files_tree() -> Dict[str, Any]:
+    """Full folder hierarchy plus every file entry, for the explorer."""
+    return files_service.build_tree(
+        _list_all_tree(), folder_store.load(), _file_statuses
+    )
+
+
+@app.get("/api/files/browse")
+async def files_browse(path: str = Query("", description="Folder path")) -> Dict[str, Any]:
+    """Entries directly inside one folder, with breadcrumbs."""
+    tree = files_service.build_tree(
+        _list_all_tree(), folder_store.load(), _file_statuses
+    )
+    try:
+        return files_service.list_directory(tree, path)
+    except FileTreeError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+
+
+@app.post("/api/folders")
+async def create_folder(body: Dict[str, Any]) -> Dict[str, Any]:
+    try:
+        folders = folder_store.add(body.get("path") or body.get("name") or "")
+    except FileTreeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {"folders": folders}
+
+
+@app.delete("/api/folders")
+async def delete_folder(path: str = Query(...)) -> Dict[str, Any]:
+    """Forget a folder. Files inside it are moved to the root, never deleted."""
+    try:
+        target = files_service.normalize_folder(path)
+    except FileTreeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    if not target:
+        raise HTTPException(status_code=400, detail="cannot remove the root folder")
+
+    moved = 0
+    for item in _list_all_tree():
+        try:
+            folder = files_service.normalize_folder(item.get("folder"))
+        except FileTreeError:
+            continue
+        if folder == target or folder.startswith(f"{target}/"):
+            item["folder"] = None
+            _write_tree_json(item["id"], item)
+            moved += 1
+
+    folders = folder_store.remove(target)
+    return {"folders": folders, "files_moved_to_root": moved}
+
+
+@app.patch("/api/files/{file_id}", response_model=FileMetadata)
+async def update_file(file_id: str, body: Dict[str, Any]) -> FileMetadata:
+    """Rename a file and/or move it to another folder."""
+    data = _read_tree_json(file_id)
+    if data is None:
+        raise HTTPException(status_code=404, detail="File not found")
+
+    try:
+        new_name, new_folder = files_service.validate_move(
+            body.get("name"), body.get("folder"), _list_all_tree(), file_id
+        )
+    except FileTreeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    if new_name is not None:
+        data["name"] = new_name
+    if new_folder is not None:
+        data["folder"] = new_folder or None
+        if new_folder:
+            folder_store.add(new_folder)
+    _write_tree_json(file_id, data)
+
+    return FileMetadata(
+        id=data["id"],
+        name=data.get("name", ""),
+        size=data.get("size", 0),
+        chunks=data.get("chunks", 0),
+        created_at=data.get("created_at", ""),
+        status=data.get("status", "stored"),
+        folder=data.get("folder"),
+    )
+
+
 @app.get("/api/files/{file_id}", response_model=FileMetadata)
 async def get_file(file_id: str) -> FileMetadata:
     data = _read_tree_json(file_id)
@@ -387,16 +498,50 @@ async def get_file(file_id: str) -> FileMetadata:
 async def upload_file(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
+    folder: str = Form(""),
 ) -> UploadResponse:
     file_id = str(uuid.uuid4())
     file_name = file.filename or "unknown"
 
-    # Save to temp location
+    try:
+        folder = files_service.normalize_folder(folder)
+    except FileTreeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    config = config_store.load()
+    max_bytes = int(config.get("upload", {}).get("max_file_bytes") or 0)
+    usage = system_service.collective_usage(COLLECTIVE_PATH, config, _list_all_tree())
+    if not usage["accepting_writes"]:
+        raise HTTPException(
+            status_code=507,
+            detail=(
+                f"Storage is at {usage['used_percent']}% of the configured quota "
+                f"(cutoff {usage['high_watermark_percent']}%). Raise "
+                "storage.quota_bytes or free space before uploading."
+            ),
+        )
+
+    # Save to temp location, aborting as soon as the size limit is crossed so a
+    # huge upload cannot fill the disk before it is rejected.
     tmp_fd, tmp_path = tempfile.mkstemp(suffix=f"_{file_name}")
+    written = 0
     try:
         async with aiofiles.open(tmp_path, "wb") as out:
             while chunk := await file.read(1024 * 1024):
+                written += len(chunk)
+                if max_bytes and written > max_bytes:
+                    raise HTTPException(
+                        status_code=413,
+                        detail=(
+                            f"File exceeds the configured upload limit of "
+                            f"{max_bytes} bytes (upload.max_file_bytes)."
+                        ),
+                    )
                 await out.write(chunk)
+    except HTTPException:
+        os.close(tmp_fd)
+        os.remove(tmp_path)
+        raise
     except Exception as exc:
         os.close(tmp_fd)
         os.remove(tmp_path)
@@ -407,6 +552,9 @@ async def upload_file(
         except Exception:
             pass
 
+    if folder:
+        folder_store.add(folder)
+
     # Seed in-memory status
     _file_statuses[file_id] = {
         "type": "status",
@@ -416,7 +564,9 @@ async def upload_file(
         "message": "Upload received, starting pipeline…",
     }
 
-    background_tasks.add_task(_async_encode_pipeline, file_id, tmp_path, file_name)
+    background_tasks.add_task(
+        _async_encode_pipeline, file_id, tmp_path, file_name, folder
+    )
 
     return UploadResponse(
         id=file_id,
@@ -868,6 +1018,136 @@ async def resolve_challenge_endpoint(
 async def contracts_health() -> Dict[str, Any]:
     """Network-wide contract health dashboard."""
     return contract_mgr.get_network_health()
+
+
+# ---------------------------------------------------------------------------
+# System & Infrastructure
+# ---------------------------------------------------------------------------
+
+
+def _contract_health_safe() -> Dict[str, Any]:
+    try:
+        return contract_mgr.get_network_health()
+    except Exception:
+        return {}
+
+
+@app.get("/api/system/overview")
+async def system_overview() -> Dict[str, Any]:
+    """Host telemetry plus collective quota, shard durability and peer state."""
+    return system_service.build_overview(
+        root=COLLECTIVE_PATH,
+        node_id=NODE_ID,
+        config=config_store.load(),
+        files=_list_all_tree(),
+        peers=list(_peers.values()),
+        contract_health=_contract_health_safe(),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Configuration
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/config")
+async def get_config() -> Dict[str, Any]:
+    return {"config": config_store.load(), "schema": describe_settings()}
+
+
+@app.put("/api/config")
+async def put_config(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Apply dotted-path updates, e.g. {"storage.quota_bytes": "500GB"}."""
+    updates = body.get("updates") if isinstance(body.get("updates"), dict) else body
+    try:
+        config, changes = apply_updates(
+            config_store, updates, source="api", actor=body.get("actor", "operator")
+        )
+    except ConfigError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {"config": config, "changes": changes}
+
+
+@app.get("/api/config/audit")
+async def get_config_audit(limit: int = Query(25, ge=1, le=200)) -> Dict[str, Any]:
+    return {"entries": config_store.recent_audit(limit)}
+
+
+# ---------------------------------------------------------------------------
+# Agent / section chat
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/agent/providers")
+async def agent_providers() -> Dict[str, Any]:
+    config = config_store.load()
+    return {
+        "providers": agent_service.provider_status(),
+        "active": config.get("agent", {}).get("provider", "codewhale"),
+        "model": config.get("agent", {}).get("model", ""),
+    }
+
+
+def _chat_context(section: str) -> Dict[str, Any]:
+    """The live state handed to the agent for grounding."""
+    files = _list_all_tree()
+    config = config_store.load()
+    usage = system_service.collective_usage(COLLECTIVE_PATH, config, files)
+    peers = list(_peers.values())
+    context: Dict[str, Any] = {
+        "section": section,
+        "hostname": os.uname().nodename if hasattr(os, "uname") else "unknown",
+        "node_id": NODE_ID,
+        "files": len(files),
+        "collective": usage,
+        "peers_total": len(peers),
+        "peers_online": len([peer for peer in peers if peer.get("healthy")]),
+    }
+    if section == "files":
+        tree = files_service.build_tree(files, folder_store.load(), _file_statuses)
+        context["folders"] = [folder["path"] for folder in tree["folders"] if folder["path"]]
+        context["recent_files"] = [
+            {
+                "name": entry["name"],
+                "folder": entry["folder"],
+                "size": entry["size"],
+                "status": entry["status"],
+                "shards": f"{entry['shards_available']}/{entry['shards_total']}",
+            }
+            for entry in sorted(
+                tree["files"], key=lambda item: item["created_at"], reverse=True
+            )[:20]
+        ]
+    else:
+        context["contracts"] = _contract_health_safe()
+    return context
+
+
+@app.post("/api/chat")
+async def chat(body: Dict[str, Any]) -> Dict[str, Any]:
+    message = (body.get("message") or "").strip()
+    if not message:
+        raise HTTPException(status_code=400, detail="message is required")
+    section = (body.get("section") or "system").strip().lower()
+    history = body.get("history") if isinstance(body.get("history"), list) else []
+
+    result = await agent_service.run_chat(
+        store=config_store,
+        section=section,
+        message=message,
+        history=history,
+        context=_chat_context(section),
+        provider_override=body.get("provider"),
+    )
+    if result.get("applied"):
+        await _broadcast_status(
+            {
+                "type": "config",
+                "section": section,
+                "changes": result["applied"],
+            }
+        )
+    return result
 
 
 # ---------------------------------------------------------------------------

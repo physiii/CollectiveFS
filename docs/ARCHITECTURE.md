@@ -19,7 +19,11 @@ CollectiveFS/
 ├── api/                    ← FastAPI REST backend (the main service)
 │   ├── main.py             ← All endpoints, background pipeline, peer discovery
 │   ├── models.py           ← Pydantic models (FileMetadata, contracts, QoS, etc.)
-│   └── contracts.py        ← Peer contract engine (challenges, QoS, enforcement)
+│   ├── contracts.py        ← Peer contract engine (challenges, QoS, enforcement)
+│   ├── config_service.py   ← Runtime config: validation, persistence, audit log
+│   ├── system_service.py   ← Host + collective telemetry for the System section
+│   ├── files_service.py    ← Folder tree over flat file metadata
+│   └── agent_service.py    ← Pluggable agent backends + config-mutation protocol
 ├── lib/                    ← Go encoder/decoder binaries
 │   ├── cmd/encoder/        ← Encoder source (splits file + computes parity)
 │   ├── cmd/decoder/        ← Decoder source (reconstructs from shards)
@@ -29,7 +33,7 @@ CollectiveFS/
 ├── cfs_fuse.py             ← FUSE filesystem layer (mount as native directory)
 ├── cfs.py                  ← Original CLI prototype
 ├── mcp_server.py           ← MCP server for Claude Code integration
-├── ui/                     ← React frontend
+├── ui/                     ← React console (Files + System sections)
 ├── tests/                  ← Test suite (see docs/TESTING.md)
 ├── Dockerfile              ← Multi-stage build (Node.js UI + Python runtime)
 ├── docker-compose.yml      ← Single-node Docker setup
@@ -169,11 +173,22 @@ When a peer is **evicted**, all shards held for that peer are deleted (reciproca
 |----------|--------|---------|
 | `/api/health` | GET | Health check |
 | `/api/files` | GET | List all files |
+| `/api/files/tree` | GET | Full folder hierarchy + every file entry |
+| `/api/files/browse?path=` | GET | One folder's direct children + breadcrumbs |
 | `/api/files/<id>` | GET | Get file metadata |
-| `/api/files/upload` | POST | Upload file |
+| `/api/files/<id>` | PATCH | Rename and/or move a file |
+| `/api/files/upload` | POST | Upload file (optional `folder` form field) |
 | `/api/files/<id>/download` | GET | Download file |
 | `/api/files/<id>` | DELETE | Delete file and shards |
+| `/api/folders` | POST | Create a folder |
+| `/api/folders?path=` | DELETE | Forget a folder (its files move to the root) |
 | `/api/stats` | GET | System statistics |
+| `/api/system/overview` | GET | Host + collective telemetry for the System section |
+| `/api/config` | GET | Current configuration and its schema |
+| `/api/config` | PUT | Apply dotted-path configuration updates |
+| `/api/config/audit` | GET | Recent configuration changes |
+| `/api/agent/providers` | GET | Agent backends and which is active |
+| `/api/chat` | POST | Section chat turn; may apply a configuration change |
 | `/api/peers` | GET | List known peers |
 | `/api/peers/register` | POST | Register a new peer |
 | `/api/peers/files` | GET | This node's files (for peer sync) |
@@ -191,3 +206,105 @@ When a peer is **evicted**, all shards held for that peer are deleted (reciproca
 | `/api/contracts/health/summary` | GET | Network-wide contract health |
 | `/api/status/stream` | GET | SSE status stream |
 | `/ws` | WS | WebSocket status stream |
+
+## The console
+
+The web UI is a section console rather than a conventional file-manager chrome.
+The root page is a stack of section cards; each card has three views behind one
+toggle — **dashboard**, **chat**, and **skill** — plus a collapse control.
+Clicking a section title opens it full-page.
+
+```
+/                     ← section cards (Files, then System & Infrastructure)
+/sections/files       ← full-page file explorer
+/sections/system      ← full-page infrastructure view
+```
+
+### Sections and their skills
+
+Every section is fronted by at least one skill document (`ui/src/lib/skillDocs.js`).
+The skill is not decoration: it is the contract shown in the skill view *and*
+the brief the section's agent is prompted against, so what an operator reads is
+what the agent follows.
+
+| Section | Skill | Call sign | Owns |
+|---------|-------|-----------|------|
+| **Files** | `files` | Archivist | Folder tree, file placement, shard health, upload/download |
+| **System & Infrastructure** | `system` | Infrastructure Steward | Compute, memory, network, quota, durability, peers — and node configuration |
+
+### Files
+
+The explorer is the primary surface. A persistent tree on the left, breadcrumbs
+and list/grid views on the right, and per-file shard availability shown beside
+size — because on an untrusted network *recoverable* matters more than *stored*.
+Folder position lives in the URL (`?path=a/b`) so a view is linkable.
+
+Folders are derived from each file's `folder` field, unioned with an explicit
+`folders.json` so an empty folder still exists. Paths are normalised and
+traversal (`..`), control characters, over-deep nesting and sibling name
+collisions are all rejected before anything is written.
+
+### System & Infrastructure
+
+`/api/system/overview` deliberately mirrors Custodian's payload shape
+(`ResourceGauge`, `DiskUsage`, network counters) so the same meters and charts
+render against either service, then adds what only CollectiveFS knows: quota
+headroom, shard durability, and the erasure fault budget.
+
+Storage is reported against the **pledged quota**, not the raw filesystem — the
+quota is what this node has promised the network. Bandwidth charts sum only
+physical links; bridge and veth traffic also crosses them and would be
+double-counted.
+
+## Configuration
+
+Runtime configuration lives in `$COLLECTIVE_PATH/config.json` and is the source
+of truth for quota, erasure parameters, upload limits, contract defaults and the
+agent provider. Environment variables seed it on first boot; after that the
+stored file wins for sizes and shapes (the agent provider keeps following the
+environment so a compose file stays authoritative for deployment).
+
+Every change goes through one validated path:
+
+- values are coerced (`"500GB"`, `1024`, `"off"`, `"cold"` all work),
+- per-field bounds are checked,
+- cross-field rules are checked (a quota may not exceed the real filesystem, the
+  reserve must stay below the quota, shard totals are capped),
+- a rejected batch writes **nothing**,
+- an accepted batch is appended to `config-audit.jsonl` with before/after values,
+  its source and its actor.
+
+Erasure changes apply to *subsequent* uploads. Files already encoded keep the
+layout they were written with, so lowering parity never retroactively weakens
+stored data — it narrows the fault budget for what comes next.
+
+## Agent backends
+
+Section chats are driven by a local CLI, selected at runtime:
+
+| Provider | Command | Notes |
+|----------|---------|-------|
+| `codewhale` | `codewhale exec` | Default |
+| `claude` | `claude -p` | |
+| `codex` | `codex exec` | |
+| `builtin` | — | Deterministic in-process interpreter, no LLM |
+
+Switching provider is a configuration change (`agent.provider`), so it needs no
+code change and persists across restarts. If the selected CLI is missing, the
+turn falls back to `builtin` and the UI says so rather than failing silently.
+
+### Changing the node from chat
+
+The System agent is briefed with the live state, the current configuration and
+the writable-field schema. To make a change it ends its reply with:
+
+```
+ACTION:{"type":"config.update","payload":{"storage.quota_bytes":"500GB"}}
+```
+
+The server parses that, applies it through the validated path above, and returns
+the resulting diff, which the UI renders inline in the chat log. `builtin`
+implements the same protocol by mapping plain-language instructions
+("allocate 500GB", "set parity shards to 6", "disable challenges",
+"increase space by 100GB") onto the same fields — which is why configuration
+edits keep working, and stay testable, with no model available.

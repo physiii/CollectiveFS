@@ -4,12 +4,19 @@
 
 | Test Tier | Command | Tests | Time | Docker? |
 |-----------|---------|-------|------|---------|
-| **Unit** | `make test-unit` | 102 pass | ~3.5s | No |
+| **Unit** | `make test-unit` | 229 pass | ~1.5s | No |
 | **Eval** | `make test-eval` | 33 pass, 3 skip | ~2s | No |
 | **Benchmarks** | `python benchmarks/run_all.py` | Full suite | ~45s | No |
-| **e2e API** | `pytest tests/e2e/test_api.py -v` | 9 pass | ~0.5s | Yes |
-| **Playwright UI** | `npx playwright test --project=chromium` | 54 pass, 2 skip | ~1.5 min | Yes |
+| **e2e API** | `pytest tests/e2e/test_api.py -v -m api` | 27 pass | ~4s | No (needs a running node) |
+| **Playwright UI** | `npx playwright test --project=chromium` | 26 pass | ~25s | No (starts its own node) |
 | **Cluster** | `pytest tests/cluster/ -v -m cluster --timeout=180` | 39 pass, 6 known failures | ~4.5 min | Yes (3-node) |
+
+The unit tier covers the storage engine (`test_contracts`, `test_crypto`,
+`test_metadata`) and the console services behind the UI: `test_config_service`
+(validation, persistence, audit), `test_files_service` (folder tree, path
+safety, move/rename), `test_system_service` (quota accounting, shard
+durability, telemetry shape) and `test_agent_service` (provider registry, the
+`ACTION` protocol, and the deterministic interpreter).
 
 ```bash
 # Run all local tests (no Docker needed)
@@ -24,8 +31,14 @@ make test-eval
 # Run bunny video benchmarks (needs Go binaries + test fixture)
 python -m pytest tests/eval/test_bunny_benchmark.py -v -s
 
-# Run Playwright browser tests (needs running API server)
+# Run Playwright browser tests. The config starts the API itself (which also
+# serves ui/dist) against a throwaway .pw-collective store — build the UI first.
+(cd ui && npm run build)
 npx playwright test tests/e2e/browser.spec.js --project=chromium
+
+# Point either browser or API tests at a node on a different port
+CFS_TEST_PORT=8123 npx playwright test --project=firefox
+CFS_API_URL=http://localhost:8123 pytest tests/e2e/test_api.py -v -m api
 
 # Run cluster tests (needs Docker)
 make test-cluster
@@ -66,7 +79,11 @@ tests/
 ├── unit/                     ← Fast, no dependencies beyond Python
 │   ├── test_crypto.py        ← Fernet encryption/decryption (20 tests)
 │   ├── test_metadata.py      ← File/chunk metadata schemas (7 tests)
-│   └── test_contracts.py     ← Peer contract system (75 tests)
+│   ├── test_contracts.py     ← Peer contract system (75 tests)
+│   ├── test_config_service.py← Config validation, persistence, audit (34 tests)
+│   ├── test_files_service.py ← Folder tree, path safety, move/rename (35 tests)
+│   ├── test_system_service.py← Quota, durability, telemetry shape (16 tests)
+│   └── test_agent_service.py ← Providers, ACTION protocol, interpreter (42 tests)
 ├── eval/                     ← Requires lib/encoder + lib/decoder binaries
 │   ├── test_pipeline.py      ← Full encode → encrypt → decrypt → decode (10 tests)
 │   ├── test_durability.py    ← Shard deletion and RS reconstruction (10 tests)
@@ -74,8 +91,8 @@ tests/
 │   ├── test_throughput.py    ← Performance benchmarks (7 tests)
 │   └── test_bunny_benchmark.py ← Bunny video: throughput, corruption threshold, parity comparison (3 tests)
 ├── e2e/                      ← Requires running API server
-│   ├── test_api.py           ← REST API CRUD operations (9 tests)
-│   └── browser.spec.js       ← Playwright browser tests (50 tests)
+│   ├── test_api.py           ← REST API: files, folders, system, config, chat (27 tests)
+│   └── browser.spec.js       ← Playwright console tests (26 per engine)
 ├── fuse/                     ← Requires pyfuse3
 │   └── test_fuse_ops.py      ← FUSE filesystem operations (8 tests)
 └── cluster/                  ← Requires Docker Compose
@@ -155,41 +172,38 @@ python -m pytest tests/e2e/test_api.py -v -m api
 
 ### Playwright browser tests
 
-These test the full React UI against a live API server: file upload, download,
-drag-and-drop, search, settings, real-time WebSocket updates, and download
-integrity with SHA-256 hash verification (including the bunny video).
+These drive the console against a live node: both sections, the file explorer,
+the live charts, and the section chat's ability to change node configuration.
 
 ```bash
 # Install Playwright (one-time setup)
 npm install @playwright/test
 npx playwright install chromium
 
-# Option 1: Playwright starts the server automatically (uses playwright.config.js)
-npx playwright test tests/e2e/browser.spec.js --project=chromium
+# Option 1: Playwright starts the node itself (uses playwright.config.js).
+# It serves ui/dist, so build the UI first.
+make test-ui
 
-# Option 2: Start server manually, then run tests
-python -m uvicorn api.main:app --port 8000
-npx playwright test tests/e2e/browser.spec.js --project=chromium
+# Option 2: pick a port and/or engine
+CFS_TEST_PORT=8123 npx playwright test tests/e2e/browser.spec.js --project=chromium
 ```
 
-The test suite covers 9 areas (50 tests total):
+The suite covers 26 tests per engine (chromium and firefox), grouped by surface:
 
 | Suite | Tests | What it covers |
 |-------|-------|----------------|
-| Layout and Navigation | 5 | Sidebar, top bar, search, view toggle |
-| File Upload | 8 | Button picker, drag-and-drop, processing status, toast |
-| File Browser | 8 | Search filter, grid/list views, modal, sorting |
-| File Operations | 5 | Download button, delete confirm/cancel, modal download |
-| Drag and Drop | 5 | Highlight, drop upload, multi-file, outside-zone |
-| Settings Panel | 5 | Erasure sliders, S3 config, local sync, URL import |
-| Real-time Updates | 3 | WebSocket status, file count, live push |
-| Service Integrations | 4 | S3 form validation, URL import, sync button |
-| Download Integrity | 3 | Binary hash match, UI button download, bunny video SHA-256 |
+| Console shell | 3 | Section order, dashboard/chat/skill tri-view, collapse persistence |
+| Files explorer | 7 | Tree/row/breadcrumb navigation, list and grid views, recursive search, shard map, rename + move, folder create/remove, delete |
+| System & Infrastructure | 3 | All six telemetry panels, live charts, erasure state |
+| Configuration | 4 | Quick controls write through, invalid quota and shard counts rejected, audit log |
+| Section chat | 8 | Provider switcher, provider persistence, quota/erasure/relative/boolean changes, refusal, question answering, inline diff rendering |
 
-The **Download Integrity** suite is the most important: it uploads a file,
-downloads it back through the full RS decode pipeline, and verifies the SHA-256
-hash matches the original byte-for-byte. The bunny video test does this with
-the 1 MB video file.
+Chat tests pin the `builtin` provider so the suite is deterministic and needs no
+model. The CLI providers are exercised separately — see *Agent backends* in
+`docs/ARCHITECTURE.md`.
+
+Fixtures use unique filenames, so the suite is safe to run repeatedly against a
+node that already holds data.
 
 ### Cluster tests
 

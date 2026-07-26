@@ -21,6 +21,30 @@ Symmetric Encryption (Fernet)
 Encoding (ReedSolomon)  
 FUSE  
 
+# Console
+Each node serves a console at its own address (`http://<node>:8010/`). It is a
+stack of section cards; every section has a dashboard, a chat, and the skill
+document that governs both.
+
+**Files** is the first section — a file explorer over what this node stores.
+A folder tree, breadcrumbs, list and grid views, and shard availability shown
+next to size, because on an untrusted network *recoverable* matters more than
+*stored*.
+
+**System & Infrastructure** is the second — compute, memory, network, allocated
+storage, shard durability, and peer contracts, with live charts. Its chat can
+change the node rather than only describe it: ask it to allocate more or less
+space, retune the Reed-Solomon data/parity split, or adjust limits, and it
+applies the change against a validated schema and writes it to an audit log.
+
+The agent behind the chats is pluggable — `codewhale` by default, switchable to
+`claude` or `codex` from the UI. See `docs/ARCHITECTURE.md`.
+
+```bash
+make build          # Go encoder/decoder + console UI
+docker compose up -d # node on :8010
+```
+
 ## Saving a file 
 ![Alt text](/images/CollectiveFS_save_file.png?raw=true "Saving files")
 

@@ -1,6 +1,7 @@
 -r requirements.txt
 pytest>=7.0
-pytest-asyncio>=0.23.3
+# 1.0 is the first release that collects cleanly under pytest 8/9.
+pytest-asyncio>=1.0
 pytest-timeout>=2.0
 requests>=2.28
 simplejson>=3.19

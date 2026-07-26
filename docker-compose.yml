@@ -2,13 +2,41 @@ services:
   collectivefs:
     build: .
     ports:
-      - "8000:8000"
+      - "8010:8000"
+    labels:
+      # Custodian picks this up to link the app card at its real address.
+      com.custodian.app.url: "http://192.168.1.40:8010/"
     volumes:
       - collective_data:/data/.collective
+      # Agent CLIs come from the host so the section chats can drive a real
+      # model. Without these the node still works — the chat falls back to the
+      # built-in interpreter, which applies configuration changes deterministically.
+      - ${AGENT_BIN_DIR:-/home/andy/.local/bin}:/opt/agent-bin:ro
+      - ${NVM_DIR:-/home/andy/.nvm}:/opt/nvm:ro
+      - ${HOME:-/home/andy}/.codewhale:/root/.codewhale:ro
+      - ${HOME:-/home/andy}/.claude:/root/.claude:ro
+      - ${HOME:-/home/andy}/.codex:/root/.codex:ro
     environment:
       - COLLECTIVE_PATH=/data/.collective
       - ENCODER_PATH=/app/lib/encoder
       - DECODER_PATH=/app/lib/decoder
+      # Which agent backend the section chats use by default. Switchable at
+      # runtime from the UI; codewhale | claude | codex | builtin.
+      - AGENT_PROVIDER=${AGENT_PROVIDER:-codewhale}
+      # Container paths first: the mounted host bin dir also holds host-python
+      # entry points (uvicorn among them) whose interpreters do not exist here.
+      - PATH=/usr/local/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin:/opt/agent-bin:/opt/nvm/versions/node/v22.22.2/bin
+      # The host shims re-exec through an agent-scope wrapper that lives outside
+      # this container; skip it and run the real binaries directly.
+      - AGENT_SCOPE_DISABLE=1
+      - REAL_CODEWHALE_BIN=/opt/nvm/versions/node/v22.22.2/bin/codewhale
+      - REAL_CODEX_BIN=/opt/nvm/versions/node/v22.22.2/bin/codex
+      # Provider credentials are passed through from the launching shell (or a
+      # local .env, which is gitignored). Nothing is baked into the image.
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
