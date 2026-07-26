@@ -2181,3 +2181,22 @@ button:disabled {
   color: var(--accent);
   font-weight: 800;
 }
+
+.shard-cell.remote {
+  outline: 1px dashed rgba(212, 154, 58, 0.55);
+  outline-offset: 1px;
+}
+
+.shard-placement-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 8px;
+  color: var(--faint);
+  font-size: 0.68rem;
+}
+
+.shard-placement-legend strong {
+  color: var(--text);
+  font-weight: 800;
+}
