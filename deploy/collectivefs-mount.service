@@ -16,8 +16,12 @@ EnvironmentFile=/etc/collectivefs/mount.env
 # Clear any stale endpoint first: on `systemctl restart` the old mount can
 # outlive the stop, and then even `mkdir -p` fails with ENOTCONN, taking the
 # start down with it. The leading '-' means "nothing mounted" is not an error.
-ExecStartPre=-/bin/fusermount3 -u /media/collectivefs
-ExecStartPre=/bin/mkdir -p /media/collectivefs
+# -z is a lazy unmount: it detaches immediately even when something still has
+# the mount busy (a shell sitting in it, a reader mid-file), so a restart never
+# blocks on a user's cwd. Both steps tolerate failure — nothing mounted and
+# directory-already-there are both fine.
+ExecStartPre=-/bin/fusermount3 -uz /media/collectivefs
+ExecStartPre=-/bin/mkdir -p /media/collectivefs
 # --token= rather than --token: a URL-safe token may begin with '-', which the
 # argument parser would otherwise read as another flag.
 ExecStart=/usr/bin/env ${CFS_PYTHON} ${CFS_REPO}/cfs_mount.py /media/collectivefs \
