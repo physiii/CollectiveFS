@@ -124,9 +124,23 @@ def _file_entry(item: Dict[str, Any], status_overlay: Dict[str, Any]) -> Dict[st
     overlay = status_overlay.get(file_id)
     if overlay:
         status = overlay.get("status", status)
-    chunks = item.get("chunk_list") or []
+    # The encoder's `<base>.size` sidecar is not a shard, and a shard verified
+    # onto a peer is still available — otherwise every distributed file reads
+    # as degraded in the explorer.
+    chunks = [
+        chunk
+        for chunk in (item.get("chunk_list") or [])
+        if not str(chunk.get("path", "")).endswith(".size")
+    ]
     available = sum(
-        1 for chunk in chunks if chunk.get("path") and Path(chunk["path"]).exists()
+        1
+        for chunk in chunks
+        if (chunk.get("path") and Path(chunk["path"]).exists()) or chunk.get("peer")
+    )
+    remote = sum(
+        1
+        for chunk in chunks
+        if chunk.get("peer") and not (chunk.get("path") and Path(chunk["path"]).exists())
     )
     folder = ""
     try:
@@ -140,9 +154,11 @@ def _file_entry(item: Dict[str, Any], status_overlay: Dict[str, Any]) -> Dict[st
         "folder": folder,
         "path": f"{folder}/{item.get('name', '')}" if folder else item.get("name", ""),
         "size": int(item.get("size") or 0),
-        "chunks": int(item.get("chunks") or len(chunks)),
+        "chunks": len(chunks),
         "shards_available": available,
+        "shards_remote": remote,
         "shards_total": len(chunks),
+        "placement": item.get("placement") or {},
         "created_at": item.get("created_at", ""),
         "status": status,
         "progress": (overlay or {}).get("progress"),

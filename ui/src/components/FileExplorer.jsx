@@ -38,14 +38,20 @@ function shardTone(available, total) {
   return missing <= Math.floor(total / 4) ? 'warn' : 'bad'
 }
 
-function ShardBar({ available, total }) {
+function ShardBar({ available, total, remote = 0 }) {
   const percent = total ? Math.round((available / total) * 100) : 100
+  const title = remote
+    ? `${available} of ${total} shards present — ${remote} held on peers`
+    : `${available} of ${total} shards present`
   return (
-    <div className="entry-shards" title={`${available} of ${total} shards present`}>
+    <div className="entry-shards" title={title}>
       <div className={`shard-bar ${shardTone(available, total)}`}>
         <span style={{ width: `${percent}%` }} />
       </div>
-      <span className="entry-meta">{total ? `${available}/${total}` : '—'}</span>
+      <span className="entry-meta">
+        {total ? `${available}/${total}` : '—'}
+        {remote > 0 && <span className="shard-remote-tag"> ·{remote}↗</span>}
+      </span>
     </div>
   )
 }
@@ -130,7 +136,10 @@ function DetailDrawer({ entry, folders, onClose, onRefresh, onNotify }) {
   }, [entry.id, entry.name, entry.folder])
 
   const shards = detail?.shard_list ?? []
-  const dataShards = Math.max(shards.length - Math.ceil(shards.length / 3), 0)
+  // Use the parameters the file was actually encoded with; guessing the split
+  // from the shard count is only right at a 2:1 ratio.
+  const dataShards = detail?.data_shards ?? Math.max(shards.length - Math.ceil(shards.length / 3), 0)
+  const placement = Object.entries(detail?.placement ?? {})
   const dirty = name !== entry.name || folder !== entry.folder
 
   async function save() {
@@ -202,20 +211,34 @@ function DetailDrawer({ entry, folders, onClose, onRefresh, onNotify }) {
 
       {shards.length > 0 && (
         <div>
-          <span className="metric-detail">Shard map — data, parity, missing</span>
+          <span className="metric-detail">
+            Shard map — {detail?.data_shards ?? '?'} data + {detail?.parity_shards ?? '?'} parity
+            {placement.length > 1 ? ', spread across peers' : ''}
+          </span>
           <div className="shard-map" style={{ marginTop: 6 }}>
             {shards.map((shard, index) => (
               <span
                 key={shard.id ?? index}
-                className={`shard-cell ${!shard.available ? 'missing' : index < dataShards ? 'data' : 'parity'}`}
-                title={`Shard ${shard.num} · ${fmtBytes(shard.size)} · ${shard.available ? 'present' : 'missing'}${
-                  shard.peer ? ` · ${shard.peer}` : ''
-                }`}
+                className={`shard-cell ${
+                  !shard.available ? 'missing' : shard.num < dataShards ? 'data' : 'parity'
+                } ${shard.peer && shard.peer !== 'local' ? 'remote' : ''}`}
+                title={`Shard ${shard.num} · ${fmtBytes(shard.size)} · ${
+                  shard.available ? 'present' : 'missing'
+                } · ${shard.peer === 'local' ? 'this node' : shard.peer}`}
               >
                 {shard.num}
               </span>
             ))}
           </div>
+          {placement.length > 1 && (
+            <div className="shard-placement-legend">
+              {placement.map(([where, count]) => (
+                <span key={where}>
+                  <strong>{count}</strong> {where === 'local' ? 'here' : where.replace(/^https?:\/\//, '')}
+                </span>
+              ))}
+            </div>
+          )}
         </div>
       )}
 
@@ -567,7 +590,7 @@ export default function FileExplorer({ tree, path, onNavigate, onRefresh, onNoti
                 </button>
                 <span className="entry-meta">{fmtBytes(file.size)}</span>
                 <span className="hide-narrow">
-                  <ShardBar available={file.shards_available} total={file.shards_total} />
+                  <ShardBar available={file.shards_available} total={file.shards_total} remote={file.shards_remote} />
                 </span>
                 <span className="entry-meta hide-narrow">
                   {file.status === 'stored' || file.status === 'complete' ? (
@@ -617,7 +640,7 @@ export default function FileExplorer({ tree, path, onNavigate, onRefresh, onNoti
                 </span>
                 <span className="entry-name">{file.name}</span>
                 <span className="entry-meta">{fmtBytes(file.size)}</span>
-                <ShardBar available={file.shards_available} total={file.shards_total} />
+                <ShardBar available={file.shards_available} total={file.shards_total} remote={file.shards_remote} />
               </button>
             ))}
           </div>

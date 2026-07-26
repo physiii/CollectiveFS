@@ -21,6 +21,21 @@ Symmetric Encryption (Fernet)
 Encoding (ReedSolomon)  
 FUSE  
 
+# Storage
+Files are Reed-Solomon erasure coded, every shard is Fernet-encrypted, and the
+shards are spread across this node and its peers. No peer is given more than
+`parity_shards` of any file, so losing a whole peer stays inside what the code
+can rebuild. A shard only leaves the origin once the peer has echoed back a
+matching digest, and reads pull remote shards home automatically.
+
+```
+upload on node A (8+4)     8 shards -> node A
+                           4 shards -> node B     node B can vanish; A rebuilds
+```
+
+Peering is configured per host in `.env` (see `.env.example`): `CFS_OWN_URL` is
+how peers reach this node, `CFS_PEER_URLS` is who to announce to.
+
 # Console
 Each node serves a console at its own address (`http://<node>:8010/`). It is a
 stack of section cards; every section has a dashboard, a chat, and the skill

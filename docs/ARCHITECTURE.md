@@ -115,7 +115,7 @@ With 3 nodes each holding ~4 shards, losing 1 node = losing ~4 shards = exactly 
 ## Encryption
 
 - **Algorithm**: Fernet (AES-128-CBC + HMAC-SHA256)
-- **Key**: Single symmetric key per node, stored in `~/.collective/key`
+- **Key**: Single symmetric key per node, generated on first use at `~/.collective/key`
 - **Granularity**: Each shard encrypted independently with a random IV
 - **Tamper detection**: HMAC-SHA256 verification on decrypt; corrupted shards raise `InvalidToken`
 
@@ -193,6 +193,10 @@ When a peer is **evicted**, all shards held for that peer are deleted (reciproca
 | `/api/peers/register` | POST | Register a new peer |
 | `/api/peers/files` | GET | This node's files (for peer sync) |
 | `/api/peers/chunks/<id>` | GET | Serve a single shard |
+| `/api/peers/shards` | POST | Accept a shard stored on behalf of a peer |
+| `/api/peers/shards` | GET | What this node stores for other nodes |
+| `/api/peers/shards/<node>/<file>/<n>` | GET | Return a stored shard to its owner |
+| `/api/peers/shards/<node>/<file>` | DELETE | Drop shards held for a peer's file |
 | `/api/network` | GET | Aggregate view (local + peer files) |
 | `/api/contracts/tiers` | GET | List tier configurations |
 | `/api/contracts` | GET/POST | List or create peer contracts |
@@ -255,6 +259,58 @@ Storage is reported against the **pledged quota**, not the raw filesystem — th
 quota is what this node has promised the network. Bandwidth charts sum only
 physical links; bridge and veth traffic also crosses them and would be
 double-counted.
+
+## Shard distribution
+
+Encoding produces `<base>.0 … <base>.N` plus a `<base>.size` sidecar the decoder
+needs. Once a file is encoded and encrypted, its shards are placed across this
+node and its healthy peers.
+
+The placement rule is the safety property:
+
+> **No peer may hold more than `parity_shards` of a file.**
+
+With the 8+4 default and one peer, that means 8 shards stay here and 4 go to the
+peer — losing the entire peer costs exactly the fault budget, and the file still
+reconstructs. The `.size` sidecar never leaves the origin.
+
+```
+upload on node A (8+4)
+  ├── 8 shards   → node A
+  └── 4 shards   → node B          node B can vanish; A still rebuilds the file
+```
+
+### Hand-off is verified before anything is dropped
+
+1. The origin POSTs the shard to `POST /api/peers/shards`.
+2. The peer writes it under `proc/_peers/<origin_node>/<file_id>/` and replies
+   with the SHA-256 of what it actually stored.
+3. Only if that digest matches the origin's does the origin drop its local copy
+   and record `peer` + `digest` on the chunk.
+
+A failed or mismatched hand-off leaves the shard where it was, so the worst case
+is "less distributed than intended", never data loss. Set
+`peers.keep_local_copy` to keep the origin's copy as well.
+
+### Reads reassemble transparently
+
+`GET /api/files/<id>/download` stages every shard into a temp directory — local
+ones read off disk, remote ones fetched from the peer recorded on the chunk and
+checked against their digest — decrypts them, then runs the decoder there.
+Decoding in place would not work: shards are encrypted at rest, and the decoder
+reads raw files, so it would happily reconstruct garbage from ciphertext.
+
+Deleting a file asks every peer holding one of its shards to drop it first. A
+peer that is down keeps an orphan, which is encrypted and useless without the
+origin's key.
+
+## Encryption
+
+Every shard is encrypted with Fernet before it is stored, using a key generated
+on first use at `$COLLECTIVE_PATH/key`. This is not optional: shards are handed
+to peers the origin does not control, so plaintext at rest would defeat the
+premise. The key never leaves the node — a peer stores ciphertext it cannot read
+and hands the same bytes back on request.
 
 ## Configuration
 

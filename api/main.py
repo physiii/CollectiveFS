@@ -590,6 +590,11 @@ async def get_file(file_id: str) -> FileMetadata:
         created_at=data.get("created_at", ""),
         status=status,
         folder=data.get("folder"),
+        data_shards=int(data.get("data_shards") or ENCODER_DATA_SHARDS),
+        parity_shards=int(data.get("parity_shards") or ENCODER_PAR_SHARDS),
+        placement=data.get("placement") or replication.placement_summary(
+            data.get("chunk_list", [])
+        ),
         shard_list=_build_shard_list(data),
     )
 

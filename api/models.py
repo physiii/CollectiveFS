@@ -26,6 +26,12 @@ class FileMetadata(BaseModel):
     created_at: str
     status: str = "stored"
     folder: Optional[str] = None
+    # The erasure parameters this file was actually encoded with. Files stored
+    # before these were recorded fall back to the node defaults.
+    data_shards: Optional[int] = None
+    parity_shards: Optional[int] = None
+    # Shard count by location, e.g. {"local": 8, "http://peer:8010": 4}.
+    placement: Optional[Dict[str, int]] = None
     shard_list: Optional[List[ShardInfo]] = None
 
 

@@ -2176,3 +2176,8 @@ button:disabled {
     display: none;
   }
 }
+
+.shard-remote-tag {
+  color: var(--accent);
+  font-weight: 800;
+}

@@ -4,7 +4,7 @@
 
 | Test Tier | Command | Tests | Time | Docker? |
 |-----------|---------|-------|------|---------|
-| **Unit** | `make test-unit` | 229 pass | ~1.5s | No |
+| **Unit** | `make test-unit` | 245 pass | ~1.5s | No |
 | **Eval** | `make test-eval` | 33 pass, 3 skip | ~2s | No |
 | **Benchmarks** | `python benchmarks/run_all.py` | Full suite | ~45s | No |
 | **e2e API** | `pytest tests/e2e/test_api.py -v -m api` | 27 pass | ~4s | No (needs a running node) |
@@ -15,8 +15,9 @@ The unit tier covers the storage engine (`test_contracts`, `test_crypto`,
 `test_metadata`) and the console services behind the UI: `test_config_service`
 (validation, persistence, audit), `test_files_service` (folder tree, path
 safety, move/rename), `test_system_service` (quota accounting, shard
-durability, telemetry shape) and `test_agent_service` (provider registry, the
-`ACTION` protocol, and the deterministic interpreter).
+durability, telemetry shape), `test_agent_service` (provider registry, the
+`ACTION` protocol, and the deterministic interpreter), and `test_replication`
+(shard placement — that no peer ever exceeds the parity budget).
 
 ```bash
 # Run all local tests (no Docker needed)
@@ -83,7 +84,8 @@ tests/
 │   ├── test_config_service.py← Config validation, persistence, audit (34 tests)
 │   ├── test_files_service.py ← Folder tree, path safety, move/rename (35 tests)
 │   ├── test_system_service.py← Quota, durability, telemetry shape (16 tests)
-│   └── test_agent_service.py ← Providers, ACTION protocol, interpreter (42 tests)
+│   ├── test_agent_service.py ← Providers, ACTION protocol, interpreter (42 tests)
+│   └── test_replication.py   ← Shard placement and the parity budget (13 tests)
 ├── eval/                     ← Requires lib/encoder + lib/decoder binaries
 │   ├── test_pipeline.py      ← Full encode → encrypt → decrypt → decode (10 tests)
 │   ├── test_durability.py    ← Shard deletion and RS reconstruction (10 tests)
