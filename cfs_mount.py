@@ -29,7 +29,7 @@ import tempfile
 import threading
 import time
 from collections import defaultdict
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 from typing import Any, Dict, List, Optional, Tuple
 
 import httpx
@@ -233,6 +233,10 @@ class CollectiveFS(pyfuse3.Operations):
         self._by_path: Dict[str, Node] = {}
         self._next_inode = ROOT_INODE + 1
         self._tree_fetched = 0.0
+        # Kernel caching is off, so lookups and readdirs arrive constantly. A
+        # forced refresh on each one turns a single `ls` into a request storm,
+        # so forcing is debounced to this floor.
+        self._force_floor = 0.25
 
         # Open write buffers keyed by inode, and the read cache.
         self._writers: Dict[int, Dict[str, Any]] = {}
@@ -241,6 +245,11 @@ class CollectiveFS(pyfuse3.Operations):
         # not exist on the node yet either: anything touching it in that window
         # has to wait, or it sees a file with no id and no shards.
         self._inflight: Dict[str, trio.Event] = {}
+        # Bytes we just wrote, kept until the node reports the file encoded.
+        # A file is listed as soon as it is accepted but cannot be reconstructed
+        # until its shards exist, so read-after-write would otherwise fail for
+        # as long as encoding takes.
+        self._pending: Dict[str, Path] = {}
         self._read_cache: Dict[str, Tuple[float, bytes]] = {}
 
         root = Node(ROOT_INODE, "", True)
@@ -278,7 +287,11 @@ class CollectiveFS(pyfuse3.Operations):
             self._by_inode.pop(node.inode, None)
 
     def _refresh(self, force: bool = False) -> None:
-        if not force and (time.time() - self._tree_fetched) < self.ttl:
+        age = time.time() - self._tree_fetched
+        if force:
+            if age < self._force_floor:
+                return
+        elif age < self.ttl:
             return
         try:
             tree = self.client.tree()
@@ -301,6 +314,9 @@ class CollectiveFS(pyfuse3.Operations):
                 live.add(path)
                 mtime = _parse_time(entry.get("created_at"))
                 self._intern(path, False, entry.get("id", ""), int(entry.get("size") or 0), mtime)
+                # Once the node has encoded it, the local copy is redundant.
+                if entry.get("status") in ("stored", "complete"):
+                    self._release_pending(entry.get("id", ""))
 
             # Drop anything that vanished elsewhere, but never a path with an
             # open writer — that file is mid-creation and not in the tree yet.
@@ -380,6 +396,12 @@ class CollectiveFS(pyfuse3.Operations):
     # ── read path ───────────────────────────────────────────────────
 
     def _fetch(self, node: Node) -> bytes:
+        pending = self._pending.get(node.file_id)
+        if pending is not None:
+            try:
+                return pending.read_bytes()
+            except OSError:
+                self._pending.pop(node.file_id, None)
         cached = self._read_cache.get(node.file_id)
         if cached and (time.time() - cached[0]) < 30:
             return cached[1]
@@ -393,6 +415,29 @@ class CollectiveFS(pyfuse3.Operations):
 
     def _invalidate(self, file_id: str) -> None:
         self._read_cache.pop(file_id, None)
+
+    def _release_pending(self, file_id: str) -> None:
+        path = self._pending.pop(file_id, None)
+        if path is None:
+            return
+        try:
+            path.unlink()
+        except OSError:
+            pass
+
+    def _hold_pending(self, file_id: str, path: Path) -> None:
+        """Keep a just-written body readable until the node has encoded it."""
+        if not file_id:
+            try:
+                path.unlink()
+            except OSError:
+                pass
+            return
+        self._pending[file_id] = path
+        # Bounded: this is a hand-off buffer, not a cache.
+        while len(self._pending) > 16:
+            oldest = next(iter(self._pending))
+            self._release_pending(oldest)
 
     # ── FUSE operations ─────────────────────────────────────────────
 
@@ -529,6 +574,13 @@ class CollectiveFS(pyfuse3.Operations):
         handle.flush()
         handle.close()
 
+        # Publish the final size before the upload starts. close() returns as
+        # soon as release is queued, so a caller can stat the file while the
+        # upload is still running; without this it sees the size the node was
+        # created with — zero — and reads nothing.
+        node.size = writer["size"]
+        node.mtime = time.time()
+
         try:
             if not writer["dirty"]:
                 return
@@ -560,10 +612,13 @@ class CollectiveFS(pyfuse3.Operations):
         finally:
             self._inflight.pop(node.path, None)
             settled.set()
-            try:
-                os.unlink(handle.name)
-            except OSError:
-                pass
+            if node.file_id:
+                self._hold_pending(node.file_id, Path(handle.name))
+            else:
+                try:
+                    os.unlink(handle.name)
+                except OSError:
+                    pass
 
     @timed("setattr")
     async def setattr(self, inode: int, attr, fields, fh, ctx=None):

@@ -145,9 +145,11 @@ echo "mem_total_kb=$(awk '/MemTotal/{print $2}' /proc/meminfo)"
 echo "load=$(cut -d' ' -f1-3 /proc/loadavg)"
 echo "mount_fs=$(df -PT /media/collectivefs 2>/dev/null | awk 'NR==2{print $2}')"
 echo "mount_size=$(df -P /media/collectivefs 2>/dev/null | awk 'NR==2{print $2}')"
-echo "backing_dev=$(df -P /var/lib/docker 2>/dev/null | awk 'NR==2{print $1}')"
-echo "backing_model=$(lsblk -ndo MODEL "$(lsblk -ndo PKNAME "$(df -P /var/lib/docker | awk 'NR==2{print $1}')" 2>/dev/null | head -1)" 2>/dev/null | head -1)"
-echo "backing_rota=$(lsblk -ndo ROTA "$(lsblk -ndo PKNAME "$(df -P /var/lib/docker | awk 'NR==2{print $1}')" 2>/dev/null | head -1)" 2>/dev/null | head -1)"
+_dev=$(df -P /var/lib/docker 2>/dev/null | awk 'NR==2{print $1}')
+_parent=$(lsblk -no PKNAME "$_dev" 2>/dev/null | head -1 | tr -d ' ')
+echo "backing_dev=$_dev"
+echo "backing_model=$(lsblk -no MODEL "/dev/$_parent" 2>/dev/null | head -1 | sed 's/[[:space:]]*$//')"
+echo "backing_rota=$(lsblk -no ROTA "$_dev" 2>/dev/null | head -1 | tr -d ' ')"
 echo "docker=$(docker --version 2>/dev/null)"
 echo "python=$(python3 --version 2>&1)"
 """
@@ -524,30 +526,45 @@ def collect_placement(host: Host) -> Dict[str, Any]:
 def ui_parity(host: Host) -> Dict[str, Any]:
     """The console and the mount must show the same namespace.
 
-    Deliberately queried the way a browser does — with no token — because that
-    is what an operator actually sees. If the node's default account is not the
-    one the mount uses, the two views diverge, and that is a real defect rather
-    than a quirk of the harness.
+    Queried the way a browser does — with no token — because that is what an
+    operator actually sees. If the node's default account is not the one the
+    mount uses, the two views diverge, which is a real defect.
+
+    The console lists files by id, so two files can share a path; a POSIX
+    filesystem cannot represent that, and the mount shows one. Those collisions
+    are counted and reported rather than folded into the pass/fail, since they
+    are a property of the stored data, not a disagreement between the views.
     """
     try:
         tree = host.api_get("/api/files/tree?scope=network")
     except httpx.HTTPError:
         return {"checked": False}
-    ui_names = sorted(
+
+    entries = tree.get("files", [])
+    paths = [
         (f"{entry['folder']}/{entry['name']}" if entry.get("folder") else entry["name"])
-        for entry in tree.get("files", [])
-    )
+        for entry in entries
+    ]
+    seen: Dict[str, int] = {}
+    for path in paths:
+        seen[path] = seen.get(path, 0) + 1
+    collisions = {path: count for path, count in seen.items() if count > 1}
+
+    ui_paths = sorted(seen)
     listing = host.run(
         f"cd {host.mount} && find . -type f -printf '%P\\n' 2>/dev/null | sort", timeout=300
     ).stdout.split()
-    mount_names = sorted(listing)
+    mount_paths = sorted(set(listing))
+
     return {
         "checked": True,
-        "ui_files": len(ui_names),
-        "mount_files": len(mount_names),
-        "identical": ui_names == mount_names,
-        "only_in_ui": [n for n in ui_names if n not in mount_names][:10],
-        "only_in_mount": [n for n in mount_names if n not in ui_names][:10],
+        "ui_entries": len(entries),
+        "ui_paths": len(ui_paths),
+        "mount_paths": len(mount_paths),
+        "identical": ui_paths == mount_paths,
+        "colliding_paths": collisions,
+        "only_in_ui": [p for p in ui_paths if p not in mount_paths][:10],
+        "only_in_mount": [p for p in mount_paths if p not in ui_paths][:10],
     }
 
 

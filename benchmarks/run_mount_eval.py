@@ -124,7 +124,10 @@ def build_report(data: Dict[str, Any]) -> str:
     for name, info in nodes.items():
         env = info["env"]
         rota = env.get("backing_rota", "")
-        media = "SSD/NVMe" if rota == "0" else ("HDD" if rota == "1" else "?")
+        media = "SSD/NVMe" if rota == "0" else ("HDD" if rota == "1" else "unknown")
+        model = env.get("backing_model") or ""
+        if model:
+            media = f"{model} ({media})" if rota in ("0", "1") else model
         rows.append([
             f"**{name}**",
             env.get("node_id", "?")[:8],
@@ -411,19 +414,32 @@ def build_report(data: Dict[str, Any]) -> str:
         "must list exactly the same files.\n"
     )
     rows = []
+    collisions_seen: Dict[str, int] = {}
     for name, info in nodes.items():
         parity = info.get("ui_parity", {})
         if not parity.get("checked"):
-            rows.append([name, "—", "—", "not checked"])
+            rows.append([name, "—", "—", "—", "not checked"])
             continue
+        collisions_seen.update(parity.get("colliding_paths") or {})
         rows.append([
             f"**{name}**",
-            str(parity.get("ui_files")),
-            str(parity.get("mount_files")),
+            str(parity.get("ui_entries")),
+            str(parity.get("ui_paths")),
+            str(parity.get("mount_paths")),
             "identical" if parity.get("identical") else
-            f"differs (ui-only {len(parity.get('only_in_ui', []))}, mount-only {len(parity.get('only_in_mount', []))})",
+            f"differs (console-only {len(parity.get('only_in_ui', []))}, "
+            f"mount-only {len(parity.get('only_in_mount', []))})",
         ])
-    parts.append(table(["Node", "Files in console", "Files in mount", "Result"], rows))
+    parts.append(table(
+        ["Node", "Console entries", "Distinct paths", "Paths in mount", "Result"], rows))
+    if collisions_seen:
+        parts.append(
+            "\n> The console lists files by id, so two files can share a path. A "
+            "POSIX filesystem cannot represent that, so the mount shows one of "
+            "each. Colliding paths in this namespace: "
+            + ", ".join(f"`{path}` ×{count}" for path, count in collisions_seen.items())
+            + ".\n"
+        )
 
     # ── observations ────────────────────────────────────────────────
     errors = data.get("errors") or []
