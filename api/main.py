@@ -45,7 +45,7 @@ from api.models import (
     UploadResponse,
 )
 from api.contracts import ContractManager, TIER_CONFIGS, respond_to_challenge
-from api import agent_service, files_service, replication, system_service
+from api import accounts, agent_service, files_service, fs_metrics, replication, system_service
 from api.config_service import ConfigError, ConfigStore, apply_updates, describe_settings
 from api.files_service import FileTreeError, FolderStore
 
@@ -121,6 +121,20 @@ contract_mgr = ContractManager(COLLECTIVE_PATH, NODE_ID)
 # explicit-folder index backing the Files explorer.
 config_store = ConfigStore(COLLECTIVE_PATH)
 folder_store = FolderStore(COLLECTIVE_PATH)
+account_store = accounts.AccountStore(COLLECTIVE_PATH)
+fs_stats = fs_metrics.MetricsStore()
+
+
+def _token(request: Request) -> str:
+    """The account this request is acting as."""
+    return account_store.resolve(
+        request.headers.get(accounts.TOKEN_HEADER)
+        or request.headers.get("authorization")
+    )
+
+
+def _files_for(token: str) -> List[Dict[str, Any]]:
+    return accounts.scope(_list_all_tree(), token, account_store.default_token())
 
 
 def _erasure_params() -> tuple[int, int]:
@@ -252,7 +266,7 @@ async def _broadcast_status(update: Dict[str, Any]) -> None:
 # ---------------------------------------------------------------------------
 
 def _run_encode_pipeline(
-    file_id: str, src_path: str, file_name: str, folder: str = ""
+    file_id: str, src_path: str, file_name: str, folder: str = "", token: str = ""
 ) -> None:
     """Synchronous encode + encrypt pipeline run in a thread pool executor."""
     try:
@@ -333,18 +347,25 @@ def _run_encode_pipeline(
         except Exception:
             file_size = 0
 
-        metadata: Dict[str, Any] = {
-            "id": file_id,
-            "name": file_name,
-            "size": file_size,
-            "chunks": len(chunks),
-            "created_at": datetime.now(timezone.utc).isoformat(),
-            "status": "stored",
-            "folder": folder or None,
-            "data_shards": data_shards,
-            "parity_shards": parity_shards,
-            "chunk_list": chunks,
-        }
+        # Merge onto whatever is on disk instead of replacing it. Encoding a
+        # large file takes long enough for a rename or move to land in the
+        # meantime, and a wholesale write would silently revert it.
+        metadata: Dict[str, Any] = _read_tree_json(file_id) or {}
+        metadata.update(
+            {
+                "id": file_id,
+                "size": file_size,
+                "chunks": len(chunks),
+                "status": "stored",
+                "data_shards": data_shards,
+                "parity_shards": parity_shards,
+                "chunk_list": chunks,
+            }
+        )
+        metadata.setdefault("name", file_name)
+        metadata.setdefault("created_at", datetime.now(timezone.utc).isoformat())
+        metadata.setdefault("folder", folder or None)
+        metadata.setdefault("token", token)
         _write_tree_json(file_id, metadata)
 
         # Final status
@@ -364,6 +385,13 @@ def _run_encode_pipeline(
             "progress": 0,
             "message": str(exc),
         }
+        # Mark the placeholder written at upload time, so a failed encode shows
+        # as failed rather than sitting at "processing" forever.
+        failed = _read_tree_json(file_id)
+        if failed is not None:
+            failed["status"] = "error"
+            failed["error"] = str(exc)
+            _write_tree_json(file_id, failed)
     finally:
         # Clean up temp source
         try:
@@ -437,12 +465,12 @@ async def _distribute_shards(file_id: str) -> None:
 
 
 async def _async_encode_pipeline(
-    file_id: str, src_path: str, file_name: str, folder: str = ""
+    file_id: str, src_path: str, file_name: str, folder: str = "", token: str = ""
 ) -> None:
     """Run the encode pipeline in a thread executor, then broadcast result."""
     loop = asyncio.get_event_loop()
     await loop.run_in_executor(
-        None, _run_encode_pipeline, file_id, src_path, file_name, folder
+        None, _run_encode_pipeline, file_id, src_path, file_name, folder, token
     )
     if _file_statuses.get(file_id, {}).get("status") == "complete":
         try:
@@ -465,8 +493,8 @@ async def health() -> Dict[str, str]:
 
 
 @app.get("/api/files", response_model=List[FileMetadata])
-async def list_files() -> List[FileMetadata]:
-    raw = _list_all_tree()
+async def list_files(request: Request) -> List[FileMetadata]:
+    raw = _files_for(_token(request))
     files = []
     for item in raw:
         # Overlay any in-flight status
@@ -487,20 +515,95 @@ async def list_files() -> List[FileMetadata]:
     return files
 
 
+async def _peer_files(token: str) -> List[Dict[str, Any]]:
+    """File metadata held by peers for this account.
+
+    Each entry is tagged with the node that owns it so reads and writes can be
+    routed back there — this node holds only shards, never the whole file.
+    """
+    out: List[Dict[str, Any]] = []
+    for peer in list(_peers.values()):
+        if not peer.get("healthy") or not peer.get("url"):
+            continue
+        try:
+            async with httpx.AsyncClient(timeout=8.0) as client:
+                response = await client.get(
+                    f"{peer['url']}/api/peers/files",
+                    headers={accounts.TOKEN_HEADER: token},
+                )
+            if response.status_code >= 400:
+                continue
+            for item in response.json():
+                item["origin"] = peer["url"]
+                out.append(item)
+        except (httpx.HTTPError, ValueError):
+            continue
+    return out
+
+
+async def _origin_of(token: str, file_id: str) -> Optional[str]:
+    """Which peer owns this file, or None if we do.
+
+    A mount talks only to its local node, so anything it asks about a file that
+    lives on a peer has to be forwarded there — this node holds shards of it,
+    not the metadata that makes it a file.
+    """
+    if _read_tree_json(file_id) is not None:
+        return None
+    for item in await _peer_files(token):
+        if item.get("id") == file_id:
+            return item.get("origin")
+    return None
+
+
+async def _forward(
+    method: str,
+    origin: str,
+    path: str,
+    token: str,
+    *,
+    json_body: Optional[Dict[str, Any]] = None,
+) -> httpx.Response:
+    async with httpx.AsyncClient(timeout=120.0) as client:
+        return await client.request(
+            method,
+            f"{origin}{path}",
+            headers={accounts.TOKEN_HEADER: token},
+            json=json_body,
+        )
+
+
+async def _tree_for(token: str, scope: str) -> Dict[str, Any]:
+    files = _files_for(token)
+    if scope == "network":
+        known = {item.get("id") for item in files}
+        for item in await _peer_files(token):
+            if item.get("id") not in known:
+                files.append(item)
+    return files_service.build_tree(files, folder_store.load(), _file_statuses)
+
+
 @app.get("/api/files/tree")
-async def files_tree() -> Dict[str, Any]:
-    """Full folder hierarchy plus every file entry, for the explorer."""
-    return files_service.build_tree(
-        _list_all_tree(), folder_store.load(), _file_statuses
-    )
+async def files_tree(
+    request: Request,
+    scope: str = Query("local", pattern="^(local|network)$"),
+) -> Dict[str, Any]:
+    """Folder hierarchy plus every file entry.
+
+    `scope=network` unions in the files peers hold for this account, so every
+    node presents the same namespace — which is what a mount needs.
+    """
+    return await _tree_for(_token(request), scope)
 
 
 @app.get("/api/files/browse")
-async def files_browse(path: str = Query("", description="Folder path")) -> Dict[str, Any]:
+async def files_browse(
+    request: Request,
+    path: str = Query("", description="Folder path"),
+    scope: str = Query("local", pattern="^(local|network)$"),
+) -> Dict[str, Any]:
     """Entries directly inside one folder, with breadcrumbs."""
-    tree = files_service.build_tree(
-        _list_all_tree(), folder_store.load(), _file_statuses
-    )
+    tree = await _tree_for(_token(request), scope)
     try:
         return files_service.list_directory(tree, path)
     except FileTreeError as exc:
@@ -542,10 +645,19 @@ async def delete_folder(path: str = Query(...)) -> Dict[str, Any]:
 
 
 @app.patch("/api/files/{file_id}", response_model=FileMetadata)
-async def update_file(file_id: str, body: Dict[str, Any]) -> FileMetadata:
+async def update_file(file_id: str, body: Dict[str, Any], request: Request) -> FileMetadata:
     """Rename a file and/or move it to another folder."""
     data = _read_tree_json(file_id)
     if data is None:
+        token = _token(request)
+        origin = await _origin_of(token, file_id)
+        if origin:
+            response = await _forward(
+                "PATCH", origin, f"/api/files/{file_id}", token, json_body=body
+            )
+            if response.status_code < 400:
+                return FileMetadata(**response.json())
+            raise HTTPException(status_code=response.status_code, detail=response.text)
         raise HTTPException(status_code=404, detail="File not found")
 
     try:
@@ -575,9 +687,15 @@ async def update_file(file_id: str, body: Dict[str, Any]) -> FileMetadata:
 
 
 @app.get("/api/files/{file_id}", response_model=FileMetadata)
-async def get_file(file_id: str) -> FileMetadata:
+async def get_file(file_id: str, request: Request) -> FileMetadata:
     data = _read_tree_json(file_id)
     if data is None:
+        token = _token(request)
+        origin = await _origin_of(token, file_id)
+        if origin:
+            response = await _forward("GET", origin, f"/api/files/{file_id}", token)
+            if response.status_code < 400:
+                return FileMetadata(**response.json())
         raise HTTPException(status_code=404, detail="File not found")
     status = data.get("status", "stored")
     if file_id in _file_statuses:
@@ -601,10 +719,12 @@ async def get_file(file_id: str) -> FileMetadata:
 
 @app.post("/api/files/upload", response_model=UploadResponse)
 async def upload_file(
+    request: Request,
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     folder: str = Form(""),
 ) -> UploadResponse:
+    token = _token(request)
     file_id = str(uuid.uuid4())
     file_name = file.filename or "unknown"
 
@@ -660,6 +780,25 @@ async def upload_file(
     if folder:
         folder_store.add(folder)
 
+    # Publish the file before encoding starts. Otherwise it exists nowhere
+    # between the upload returning and the pipeline finishing, and anything
+    # listing the tree in that window — a mount, the explorer, a peer — sees a
+    # file that was just written vanish.
+    _write_tree_json(
+        file_id,
+        {
+            "id": file_id,
+            "name": file_name,
+            "size": written,
+            "chunks": 0,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "status": "processing",
+            "folder": folder or None,
+            "token": token,
+            "chunk_list": [],
+        },
+    )
+
     # Seed in-memory status
     _file_statuses[file_id] = {
         "type": "status",
@@ -670,7 +809,7 @@ async def upload_file(
     }
 
     background_tasks.add_task(
-        _async_encode_pipeline, file_id, tmp_path, file_name, folder
+        _async_encode_pipeline, file_id, tmp_path, file_name, folder, token
     )
 
     return UploadResponse(
@@ -682,9 +821,15 @@ async def upload_file(
 
 
 @app.delete("/api/files/{file_id}")
-async def delete_file(file_id: str) -> Dict[str, bool]:
+async def delete_file(file_id: str, request: Request) -> Dict[str, bool]:
     data = _read_tree_json(file_id)
     if data is None:
+        token = _token(request)
+        origin = await _origin_of(token, file_id)
+        if origin:
+            response = await _forward("DELETE", origin, f"/api/files/{file_id}", token)
+            if response.status_code < 400:
+                return {"deleted": True}
         raise HTTPException(status_code=404, detail="File not found")
 
     # Ask every peer holding a shard of this file to drop it, before the
@@ -722,9 +867,31 @@ async def delete_file(file_id: str) -> Dict[str, bool]:
 
 
 @app.get("/api/files/{file_id}/download")
-async def download_file(file_id: str) -> StreamingResponse:
+async def download_file(file_id: str, request: Request) -> StreamingResponse:
     data = _read_tree_json(file_id)
     if data is None:
+        token = _token(request)
+        origin = await _origin_of(token, file_id)
+        if origin:
+            # Stream straight through from the node that owns the metadata.
+            async with httpx.AsyncClient(timeout=300.0) as client:
+                upstream = await client.get(
+                    f"{origin}/api/files/{file_id}/download",
+                    headers={accounts.TOKEN_HEADER: token},
+                )
+            if upstream.status_code < 400:
+                async def _relay():
+                    yield upstream.content
+
+                return StreamingResponse(
+                    _relay(),
+                    media_type="application/octet-stream",
+                    headers={
+                        "Content-Disposition": upstream.headers.get(
+                            "content-disposition", 'attachment; filename="download"'
+                        )
+                    },
+                )
         raise HTTPException(status_code=404, detail="File not found")
 
     file_name = data.get("name", "download")
@@ -922,9 +1089,13 @@ async def register_peer(body: Dict[str, Any]) -> Dict[str, Any]:
 
 
 @app.get("/api/peers/files")
-async def peer_files() -> List[Dict[str, Any]]:
-    """Expose this node's file metadata for other nodes to sync."""
-    return _list_all_tree()
+async def peer_files(request: Request) -> List[Dict[str, Any]]:
+    """Expose this node's file metadata for other nodes to sync.
+
+    Scoped to the requesting account, so a peer only ever learns about files
+    belonging to a token it already holds.
+    """
+    return _files_for(_token(request))
 
 
 # ── shards held for other nodes ─────────────────────────────────────
@@ -1324,7 +1495,49 @@ async def system_overview() -> Dict[str, Any]:
         peers=list(_peers.values()),
         contract_health=_contract_health_safe(),
         hosted_for_peers=await list_replicas(),
+        filesystem=fs_stats.snapshot(300.0),
     )
+
+
+# ---------------------------------------------------------------------------
+# Accounts and mount telemetry
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/account")
+async def get_account(request: Request) -> Dict[str, Any]:
+    """The token this request resolved to, and what this node knows about."""
+    token = _token(request)
+    return {
+        "token": token,
+        "is_default": token == account_store.default_token(),
+        "known": account_store.known(token),
+        "files": len(_files_for(token)),
+        "tokens": account_store.list_tokens(),
+    }
+
+
+@app.post("/api/account/tokens")
+async def create_account_token(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Mint a new account, or adopt one issued by another node."""
+    existing = (body.get("token") or "").strip()
+    label = (body.get("label") or "").strip()
+    if existing:
+        account_store.register(existing, label)
+        return {"token": existing, "adopted": True}
+    return {"token": account_store.create(label), "adopted": False}
+
+
+@app.post("/api/fs/metrics")
+async def report_fs_metrics(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Accept one performance report from a mount."""
+    sample = fs_stats.record(body)
+    return {"accepted": True, "ts": sample["ts"]}
+
+
+@app.get("/api/fs/metrics")
+async def get_fs_metrics(window: float = Query(300.0, ge=10.0, le=3600.0)) -> Dict[str, Any]:
+    return fs_stats.snapshot(window)
 
 
 # ---------------------------------------------------------------------------

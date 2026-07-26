@@ -295,6 +295,7 @@ def build_overview(
     peers: List[Dict[str, Any]],
     contract_health: Optional[Dict[str, Any]] = None,
     hosted_for_peers: Optional[Dict[str, Any]] = None,
+    filesystem: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Assemble the full System & Infrastructure payload."""
     collective = collective_usage(root, config, files)
@@ -352,6 +353,8 @@ def build_overview(
             "shards": hosted.get("shards", 0),
             "bytes": hosted.get("bytes", 0),
         },
+        # Live performance of the FUSE mount, when one is reporting.
+        "filesystem": filesystem or {"mounts": [], "series": [], "operations": [], "active": False},
         "contracts": contract_health or {},
         "erasure": {
             "data_shards": collective["data_shards"],

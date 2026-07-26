@@ -1,0 +1,30 @@
+[Unit]
+Description=CollectiveFS account mounted at /media/collectivefs
+Documentation=https://github.com/physiii/CollectiveFS
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=andy
+Group=andy
+
+# CFS_TOKEN is the account. Every machine using the same one sees the same
+# files, so it is the only thing that has to match across the fleet.
+EnvironmentFile=/etc/collectivefs/mount.env
+
+ExecStartPre=/bin/mkdir -p /media/collectivefs
+ExecStart=/usr/bin/env ${CFS_PYTHON} ${CFS_REPO}/cfs_mount.py /media/collectivefs \
+    --api ${CFS_API} \
+    --token ${CFS_TOKEN} \
+    --allow-other \
+    --foreground
+ExecStop=/bin/fusermount3 -u /media/collectivefs
+
+Restart=on-failure
+RestartSec=5
+# A mount that dies mid-write should come back rather than leave a stale handle.
+ExecStopPost=/bin/sh -c '/bin/fusermount3 -u /media/collectivefs 2>/dev/null || true'
+
+[Install]
+WantedBy=multi-user.target
