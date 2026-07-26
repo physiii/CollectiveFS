@@ -32,6 +32,7 @@ from benchmarks.bench_mount import (
     bench_degraded_read,
     bench_metadata_ops,
     bench_parallel_load,
+    bench_real_tree,
     bench_reconciliation,
     bench_saturation,
     bench_write_read,
@@ -255,8 +256,37 @@ def build_report(data: Dict[str, Any]) -> str:
     parts.append(table(
         ["Node", "Streams", "Per file", "Total", "Elapsed", "Aggregate", "Landed"], rows))
 
+    # ── real workload ───────────────────────────────────────────────
+    real_rows = []
+    for name, info in nodes.items():
+        entry = info.get("real_tree")
+        if not entry or entry.get("error"):
+            continue
+        real_rows.append([
+            f"**{name}**",
+            f"{entry['files']} files",
+            human_bytes(entry["bytes"]),
+            human_bytes(entry["mean_file_bytes"]),
+            f"{entry['write_s']} s",
+            f"{entry.get('write_files_per_s')}/s",
+            f"{entry['read_s']} s",
+            f"{entry.get('read_files_per_s')}/s",
+            "identical" if entry.get("identical") else "**differs**",
+        ])
+    if real_rows:
+        parts.append("\n## 6. Real directory tree\n")
+        parts.append(
+            "A genuine source tree copied in, read back, and compared with "
+            "`diff -r` — every byte of every file, both directions. This is the "
+            "shape most real data has: many small files, where per-file cost "
+            "dominates and raw throughput barely matters.\n"
+        )
+        parts.append(table(
+            ["Node", "Files", "Total", "Mean file", "Write", "Write rate",
+             "Read", "Read rate", "Verified"], real_rows))
+
     # ── reconciliation ──────────────────────────────────────────────
-    parts.append("\n## 6. Cross-node reconciliation\n")
+    parts.append("\n## 7. Cross-node reconciliation\n")
     parts.append(
         "Time from a write completing on one machine to the file being visible, "
         "then readable, on the other.\n"
@@ -278,7 +308,7 @@ def build_report(data: Dict[str, Any]) -> str:
          "Readable median", "Readable max", "Failures"], rows))
 
     # ── distribution ────────────────────────────────────────────────
-    parts.append("\n## 7. Shard distribution\n")
+    parts.append("\n## 8. Shard distribution\n")
     rows = []
     for name, info in nodes.items():
         placement = info.get("placement", {}).get("collective", {})
@@ -315,7 +345,7 @@ def build_report(data: Dict[str, Any]) -> str:
     # ── saturation ──────────────────────────────────────────────────
     saturation = data.get("saturation")
     if saturation:
-        parts.append("\n## 8. Quota saturation\n")
+        parts.append("\n## 9. Quota saturation\n")
         parts.append(
             "The production pledge is 1 TB per node. Filling that to its cutoff "
             "would take hours and a terabyte of disk, and the behaviour under "
@@ -342,7 +372,7 @@ def build_report(data: Dict[str, Any]) -> str:
     # ── contracts ───────────────────────────────────────────────────
     contracts = data.get("contracts")
     if contracts:
-        parts.append("\n## 9. Peer contracts and proof-of-storage\n")
+        parts.append("\n## 10. Peer contracts and proof-of-storage\n")
         parts.append(
             "Contracts are how a node verifies a peer is really holding what it "
             "claims: it asks for a hash of bytes at random offsets in a shard, "
@@ -408,7 +438,7 @@ def build_report(data: Dict[str, Any]) -> str:
             ))
 
     # ── UI parity ───────────────────────────────────────────────────
-    parts.append("\n## 10. Console and mount parity\n")
+    parts.append("\n## 11. Console and mount parity\n")
     parts.append(
         "The web console and the mount are two views of one namespace, so they "
         "must list exactly the same files.\n"
@@ -444,7 +474,7 @@ def build_report(data: Dict[str, Any]) -> str:
     # ── observations ────────────────────────────────────────────────
     errors = data.get("errors") or []
     if errors:
-        parts.append("\n## 11. Phases that did not complete\n")
+        parts.append("\n## 12. Phases that did not complete\n")
         parts.append(
             "Recorded rather than hidden — a missing measurement is itself a "
             "result.\n"
@@ -453,13 +483,13 @@ def build_report(data: Dict[str, Any]) -> str:
             ["Phase", "Error"],
             [[entry["phase"], f"`{entry['error'][:160]}`"] for entry in errors],
         ))
-        parts.append("\n## 12. Observations\n")
+        parts.append("\n## 13. Observations\n")
     else:
-        parts.append("\n## 11. Observations\n")
+        parts.append("\n## 12. Observations\n")
     for line in data.get("observations", []):
         parts.append(f"- {line}\n")
 
-    parts.append(f"\n## {13 if errors else 12}. Reproducing\n")
+    parts.append(f"\n## {14 if errors else 13}. Reproducing\n")
     parts.append("```bash\n")
     parts.append(f"{data.get('command', 'python -m benchmarks.run_mount_eval')}\n")
     parts.append("```\n")
@@ -601,6 +631,8 @@ def main(argv=None) -> int:
                         help="drive a node past its write cutoff (uses a temporary small quota)")
     parser.add_argument("--degraded", action="store_true",
                         help="stop a peer mid-read to prove the parity budget")
+    parser.add_argument("--real-tree", default=None,
+                        help="a real directory to copy in, read back and diff")
     parser.add_argument("--contracts", action="store_true",
                         help="create a peer contract and time proof-of-storage challenges")
     parser.add_argument("--report", default=None)
@@ -630,7 +662,8 @@ def main(argv=None) -> int:
                    + f" --iterations {args.iterations} --max-size {args.max_size}"
                    + (" --saturate" if args.saturate else "")
                    + (" --degraded" if args.degraded else "")
-                   + (" --contracts" if args.contracts else ""),
+                   + (" --contracts" if args.contracts else "")
+                   + (f" --real-tree {args.real_tree}" if args.real_tree else ""),
     }
 
     def phase(label: str, func, *fargs, **fkwargs):
@@ -667,6 +700,13 @@ def main(argv=None) -> int:
             host, args.streams, parse_size(args.stream_size), prefix
         )
         data["nodes"][host.name]["parallel"] = [parallel] if parallel else []
+
+    if args.real_tree:
+        for host in hosts:
+            data["nodes"][host.name]["real_tree"] = phase(
+                f"real directory tree on {host.name}", bench_real_tree,
+                host, args.real_tree, prefix,
+            )
 
     if len(hosts) >= 2:
         data["reconciliation"] = []

@@ -703,3 +703,56 @@ def bench_contracts(host: Host, peer: Host, challenges: int = 8) -> Dict[str, An
         )
         client.close()
     return out
+
+
+# ── real-world workload ─────────────────────────────────────────────
+
+
+def bench_real_tree(host: Host, source: str, prefix: str) -> Dict[str, Any]:
+    """Copy a real directory tree in, read it all back, and verify it.
+
+    Synthetic blobs measure the ceiling; a source tree measures the shape most
+    people actually have — hundreds of small files across nested directories,
+    where per-file cost dominates and throughput barely matters.
+    """
+    target = f"{host.mount}/{prefix}-tree"
+    stats = host.run(
+        f"find {source} -type f | wc -l; du -sb {source} | cut -f1", timeout=300
+    ).stdout.split()
+    if len(stats) < 2 or not stats[0].isdigit():
+        return {"error": f"could not inspect {source}"}
+    file_count, total_bytes = int(stats[0]), int(stats[1])
+
+    host.run(f"rm -rf {target}", timeout=600)
+    start = time.perf_counter()
+    copy_in = host.run(f"cp -r {source} {target}", timeout=3600)
+    write_s = time.perf_counter() - start
+
+    landed = host.run(f"find {target} -type f 2>/dev/null | wc -l", timeout=600).stdout.strip()
+
+    start = time.perf_counter()
+    read_back = host.run(
+        f"find {target} -type f -exec cat {{}} + > /dev/null 2>&1", timeout=3600
+    )
+    read_s = time.perf_counter() - start
+
+    # diff is the honest check: every byte of every file, both directions.
+    verify = host.run(f"diff -r {source} {target} > /dev/null 2>&1", timeout=1800)
+
+    host.run(f"rm -rf {target}", timeout=1800)
+    return {
+        "source": source,
+        "files": file_count,
+        "bytes": total_bytes,
+        "mean_file_bytes": total_bytes // file_count if file_count else 0,
+        "files_landed": int(landed) if landed.isdigit() else 0,
+        "write_s": round(write_s, 2),
+        "read_s": round(read_s, 2),
+        "write_mbs": round((total_bytes / MB) / write_s, 2) if write_s > 0 else None,
+        "read_mbs": round((total_bytes / MB) / read_s, 2) if read_s > 0 else None,
+        "write_files_per_s": round(file_count / write_s, 1) if write_s > 0 else None,
+        "read_files_per_s": round(file_count / read_s, 1) if read_s > 0 else None,
+        "copy_ok": copy_in.returncode == 0,
+        "read_ok": read_back.returncode == 0,
+        "identical": verify.returncode == 0,
+    }
