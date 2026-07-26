@@ -744,7 +744,18 @@ def bench_real_tree(host: Host, source: str, prefix: str) -> Dict[str, Any]:
     copy_in = host.run(f"cp -r {source} {target}", timeout=3600)
     write_s = time.perf_counter() - start
 
-    landed = host.run(f"find {target} -type f 2>/dev/null | wc -l", timeout=600).stdout.strip()
+    # Writes complete on close but the file is not fully stored until its
+    # shards exist, so wait for the tree to converge before reading or diffing.
+    # Measuring against a half-settled copy would report a mismatch that is
+    # only an artifact of when we looked.
+    settle_deadline = time.time() + 180
+    landed = "0"
+    while time.time() < settle_deadline:
+        landed = host.run(f"find {target} -type f 2>/dev/null | wc -l", timeout=600).stdout.strip()
+        if landed.isdigit() and int(landed) >= file_count:
+            break
+        time.sleep(2)
+    settle_s = round(time.time() - (settle_deadline - 180), 2)
 
     start = time.perf_counter()
     read_back = host.run(
@@ -763,6 +774,7 @@ def bench_real_tree(host: Host, source: str, prefix: str) -> Dict[str, Any]:
         "mean_file_bytes": total_bytes // file_count if file_count else 0,
         "files_landed": int(landed) if landed.isdigit() else 0,
         "write_s": round(write_s, 2),
+        "settle_s": settle_s,
         "read_s": round(read_s, 2),
         "write_mbs": round((total_bytes / MB) / write_s, 2) if write_s > 0 else None,
         "read_mbs": round((total_bytes / MB) / read_s, 2) if read_s > 0 else None,
