@@ -14,9 +14,11 @@ Group=andy
 EnvironmentFile=/etc/collectivefs/mount.env
 
 ExecStartPre=/bin/mkdir -p /media/collectivefs
+# --token= rather than --token: a URL-safe token may begin with '-', which the
+# argument parser would otherwise read as another flag.
 ExecStart=/usr/bin/env ${CFS_PYTHON} ${CFS_REPO}/cfs_mount.py /media/collectivefs \
-    --api ${CFS_API} \
-    --token ${CFS_TOKEN} \
+    --api=${CFS_API} \
+    --token=${CFS_TOKEN} \
     --allow-other \
     --foreground
 ExecStop=/bin/fusermount3 -u /media/collectivefs
