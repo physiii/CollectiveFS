@@ -189,6 +189,11 @@ When a peer is **evicted**, all shards held for that peer are deleted (reciproca
 | `/api/config/audit` | GET | Recent configuration changes |
 | `/api/agent/providers` | GET | Agent backends and which is active |
 | `/api/chat` | POST | Section chat turn; may apply a configuration change |
+| `/api/account` | GET | The token this request resolved to |
+| `/api/account/tokens` | POST | Mint a new account or adopt an existing token |
+| `/api/files/tree?scope=network` | GET | Namespace unioned across peers for the token |
+| `/api/peers/folders` | GET | Folders this node knows, so empty ones reconcile |
+| `/api/fs/metrics` | POST/GET | Mount performance reports, and the charted rollup |
 | `/api/peers` | GET | List known peers |
 | `/api/peers/register` | POST | Register a new peer |
 | `/api/peers/files` | GET | This node's files (for peer sync) |
@@ -259,6 +264,56 @@ Storage is reported against the **pledged quota**, not the raw filesystem — th
 quota is what this node has promised the network. Bandwidth charts sum only
 physical links; bridge and veth traffic also crosses them and would be
 double-counted.
+
+## The mount
+
+`/media/collectivefs` is the primary interface. `cfs_mount.py` presents one
+account as an ordinary directory tree, driving the HTTP API rather than the
+storage layer — so a file written into the mount is erasure coded, encrypted and
+sharded across peers exactly like one uploaded through the console.
+
+```bash
+sudo systemctl enable --now collectivefs-mount.service   # reads /etc/collectivefs/mount.env
+```
+
+Every filesystem operation is supported: create, read, write, append, truncate,
+copy, rename, move (files and directories), mkdir, rmdir, unlink and statfs.
+`df` reports the account's quota rather than the host disk.
+
+Two behaviours are worth knowing:
+
+- **Writes land on close.** The pipeline encodes whole files, so a write buffers
+  locally and uploads on release. Anything touching a file whose upload is still
+  in flight waits for it rather than seeing a file with no shards.
+- **Nothing is cached by the kernel.** Entry and attribute timeouts are zero
+  because another machine can change this namespace at any moment, and a cached
+  dentry would serve a stale answer — or a stale *negative* one, hiding a file
+  that now exists. The mount keeps its own short refresh window to throttle HTTP.
+
+## Accounts
+
+A token is the whole identity — no users, no passwords, no per-node accounts.
+Files are stored under one, and anyone holding it sees the same filesystem from
+any node:
+
+```
+X-CFS-Token: <token>        # or Authorization: Bearer <token>
+```
+
+`/api/files/tree?scope=network` unions this node's files with the ones peers hold
+for that token, and reads, renames and deletes of peer-owned files route back to
+the node that owns them. That union is what makes two machines show one
+namespace. Requests with no token fall back to the node's own default account,
+so the console and single-node installs need no configuration.
+
+Folders are part of the shared namespace too: an empty directory exists only in
+the folder index, so creation and removal propagate to peers.
+
+## Node identity
+
+Each node's id persists at `$COLLECTIVE_PATH/node_id`. Peers file the shards
+they hold for us under it and we ask for them back by it, so an id that changed
+per process would strand every shard placed before the last restart.
 
 ## Shard distribution
 
