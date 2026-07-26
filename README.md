@@ -36,6 +36,14 @@ upload on node A (8+4)     8 shards -> node A
 Peering is configured per host in `.env` (see `.env.example`): `CFS_OWN_URL` is
 how peers reach this node, `CFS_PEER_URLS` is who to announce to.
 
+# Performance
+
+`make eval-mount` measures the whole system end to end — throughput by file
+size, per-operation latency, concurrent load, cross-node reconciliation, shard
+placement, degraded reads, proof-of-storage cost, quota saturation and
+console/mount parity — and writes a report to
+`benchmarks/results/mount-eval.md` alongside the raw JSON.
+
 # Console
 Each node serves a console at its own address (`http://<node>:8010/`). It is a
 stack of section cards; every section has a dashboard, a chat, and the skill

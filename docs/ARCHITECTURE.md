@@ -265,6 +265,14 @@ quota is what this node has promised the network. Bandwidth charts sum only
 physical links; bridge and veth traffic also crosses them and would be
 double-counted.
 
+## Measuring it
+
+`benchmarks/run_mount_eval.py` evaluates the running cluster through the mount
+and writes `benchmarks/results/mount-eval.md`. It captures the compute under
+test, so a report is comparable against another fleet, and states explicitly
+where a measurement could not be taken rather than extrapolating. See
+`docs/TESTING.md` for what each section covers.
+
 ## The mount
 
 `/media/collectivefs` is the primary interface. `cfs_mount.py` presents one
