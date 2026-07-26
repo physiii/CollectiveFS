@@ -56,7 +56,6 @@ COLLECTIVE_PATH = Path(os.environ.get("COLLECTIVE_PATH", Path.home() / ".collect
 ENCODER_PATH = Path(os.environ.get("ENCODER_PATH", "./lib/encoder")).resolve()
 DECODER_PATH = Path(os.environ.get("DECODER_PATH", "./lib/decoder")).resolve()
 PORT = int(os.environ.get("PORT", 8000))
-NODE_ID = os.environ.get("NODE_ID", str(uuid.uuid4()))
 # Comma-separated list of peer base URLs e.g. "http://node2:8000,http://node3:8000"
 _PEER_URLS_RAW = os.environ.get("PEER_URLS", "")
 ENCODER_DATA_SHARDS = int(os.environ.get("ENCODER_DATA_SHARDS", 8))
@@ -72,6 +71,35 @@ KEY_PATH = COLLECTIVE_PATH / "key"
 
 for _d in [TREE_DIR, PROC_DIR, CACHE_DIR, PUBLIC_DIR, PEER_SHARD_DIR]:
     _d.mkdir(parents=True, exist_ok=True)
+
+
+def _resolve_node_id() -> str:
+    """This node's identity, stable for the life of its storage.
+
+    Peers file the shards they hold for us under this id, and we ask for them
+    back by it. Generating a fresh one per process — as a bare uuid4() default
+    does — silently strands every shard placed before the last restart, and
+    leaves the peer holding replicas nobody will ever claim.
+    """
+    from_env = os.environ.get("NODE_ID", "").strip()
+    if from_env:
+        return from_env
+    path = COLLECTIVE_PATH / "node_id"
+    try:
+        stored = path.read_text().strip()
+        if stored:
+            return stored
+    except OSError:
+        pass
+    generated = str(uuid.uuid4())
+    try:
+        path.write_text(generated)
+    except OSError:
+        pass  # Ephemeral storage: identity lasts this process only.
+    return generated
+
+
+NODE_ID = _resolve_node_id()
 
 # Where this node can be reached by peers. Needed before shards can be handed
 # out, since a peer has to be able to hand them back.
@@ -1166,13 +1194,31 @@ def _replica_dir(origin_node: str, file_id: str) -> Path:
     return PEER_SHARD_DIR / safe_origin / safe_file
 
 
-def _replica_path(origin_node: str, file_id: str, index: int) -> Optional[Path]:
-    directory = _replica_dir(origin_node, file_id)
+def _shard_in(directory: Path, index: int) -> Optional[Path]:
     if not directory.is_dir():
         return None
     for entry in directory.iterdir():
         if entry.is_file() and entry.name.rsplit(".", 1)[-1] == str(index):
             return entry
+    return None
+
+
+def _replica_path(origin_node: str, file_id: str, index: int) -> Optional[Path]:
+    found = _shard_in(_replica_dir(origin_node, file_id), index)
+    if found is not None:
+        return found
+    # Fall back to searching every origin for this file id. File ids are UUIDs,
+    # so a match is unambiguous, and this recovers shards placed under an
+    # identity the owning node no longer uses.
+    safe_file = "".join(ch for ch in file_id if ch.isalnum() or ch in "-_")[:64]
+    if not safe_file or not PEER_SHARD_DIR.is_dir():
+        return None
+    for origin_dir in PEER_SHARD_DIR.iterdir():
+        if not origin_dir.is_dir():
+            continue
+        found = _shard_in(origin_dir / safe_file, index)
+        if found is not None:
+            return found
     return None
 
 
