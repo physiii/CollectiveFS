@@ -45,7 +45,7 @@ from api.models import (
     UploadResponse,
 )
 from api.contracts import ContractManager, TIER_CONFIGS, respond_to_challenge
-from api import agent_service, files_service, system_service
+from api import agent_service, files_service, replication, system_service
 from api.config_service import ConfigError, ConfigStore, apply_updates, describe_settings
 from api.files_service import FileTreeError, FolderStore
 
@@ -66,9 +66,38 @@ TREE_DIR = COLLECTIVE_PATH / "tree"
 PROC_DIR = COLLECTIVE_PATH / "proc"
 CACHE_DIR = COLLECTIVE_PATH / "cache"
 PUBLIC_DIR = COLLECTIVE_PATH / "public"
+# Shards this node stores on behalf of other nodes.
+PEER_SHARD_DIR = PROC_DIR / "_peers"
+KEY_PATH = COLLECTIVE_PATH / "key"
 
-for _d in [TREE_DIR, PROC_DIR, CACHE_DIR, PUBLIC_DIR]:
+for _d in [TREE_DIR, PROC_DIR, CACHE_DIR, PUBLIC_DIR, PEER_SHARD_DIR]:
     _d.mkdir(parents=True, exist_ok=True)
+
+# Where this node can be reached by peers. Needed before shards can be handed
+# out, since a peer has to be able to hand them back.
+OWN_URL = os.environ.get("OWN_URL", "").rstrip("/")
+
+
+def _load_fernet():
+    """The symmetric key used for every shard, created once per node.
+
+    Generated on first use rather than shipped, so a node that has never run
+    has no key material on disk. Without this the service silently stored
+    shards in plaintext — which is untenable once shards leave the machine.
+    """
+    from cryptography.fernet import Fernet
+
+    if not KEY_PATH.exists():
+        KEY_PATH.parent.mkdir(parents=True, exist_ok=True)
+        KEY_PATH.write_bytes(Fernet.generate_key())
+        try:
+            KEY_PATH.chmod(0o600)
+        except OSError:
+            pass
+    try:
+        return Fernet(KEY_PATH.read_bytes().strip())
+    except Exception:
+        return None
 
 # ---------------------------------------------------------------------------
 # Shared in-memory state
@@ -151,31 +180,36 @@ def _list_all_tree() -> List[Dict[str, Any]]:
 
 
 def _build_shard_list(data: Dict[str, Any]) -> List[ShardInfo]:
-    """Build shard info list from stored tree metadata."""
-    chunk_list = data.get("chunk_list", [])
-    total = len(chunk_list)
-    data_shards = ENCODER_DATA_SHARDS
+    """Build shard info from stored tree metadata.
+
+    The encoder also writes a `<base>.size` sidecar; it is not a shard and must
+    not be counted as one, or every file reads as having one more shard than it
+    really does. A shard held by a peer counts as available — that is the whole
+    point of distributing it.
+    """
     shards = []
-    for i, chunk in enumerate(chunk_list):
+    for chunk in replication.data_shards_only(data.get("chunk_list", [])):
+        index = replication.shard_index(chunk)
+        if index is None:
+            continue
         chunk_path = Path(chunk.get("path", ""))
-        size = 0
-        available = False
-        if chunk_path.exists():
+        size = int(chunk.get("size") or 0)
+        held_locally = chunk_path.exists()
+        if held_locally:
             try:
                 size = chunk_path.stat().st_size
-                available = True
-            except Exception:
+            except OSError:
                 pass
-        shard_type = "data" if i < data_shards else "parity"
-        peer = chunk.get("peer", f"local-{(i % 3) + 1}")
+        peer = chunk.get("peer")
         shards.append(ShardInfo(
-            num=i,
-            id=chunk.get("id", f"shard-{i}"),
+            num=index,
+            id=chunk.get("id", f"shard-{index}"),
             size=size,
             encrypted=chunk.get("encrypted", False),
-            available=available,
-            peer=peer,
+            available=held_locally or bool(peer),
+            peer=peer or "local",
         ))
+    shards.sort(key=lambda shard: shard.num)
     return shards
 
 
@@ -276,13 +310,10 @@ def _run_encode_pipeline(
         _file_statuses[file_id]["progress"] = 0.5
         _file_statuses[file_id]["message"] = "Encrypting shards…"
 
-        # Encrypt each shard with Fernet if key exists
-        key_path = COLLECTIVE_PATH / "key"
-        if key_path.exists():
-            from cryptography.fernet import Fernet
-
-            with open(key_path, "rb") as kf:
-                fernet = Fernet(kf.read().strip())
+        # Encrypt every shard at rest. Shards may be handed to untrusted peers,
+        # so this is not optional; the key is created on first use.
+        fernet = _load_fernet()
+        if fernet is not None:
             for chunk in chunks:
                 chunk_path = Path(chunk["path"])
                 if chunk_path.exists():
@@ -342,6 +373,69 @@ def _run_encode_pipeline(
             pass
 
 
+def _healthy_peer_urls() -> List[str]:
+    return [
+        peer["url"]
+        for peer in _peers.values()
+        if peer.get("healthy") and peer.get("url")
+    ]
+
+
+async def _distribute_shards(file_id: str) -> None:
+    """Hand this file's shards to peers, once it is encoded and encrypted."""
+    config = config_store.load()
+    peers_cfg = config.get("peers", {})
+    if not peers_cfg.get("distribute_shards", True):
+        return
+    peer_urls = _healthy_peer_urls()
+    if not peer_urls:
+        return
+    if not OWN_URL:
+        # A peer that cannot reach us back could never return our shards.
+        return
+
+    metadata = _read_tree_json(file_id)
+    if metadata is None:
+        return
+
+    _file_statuses[file_id] = {
+        "type": "status",
+        "file_id": file_id,
+        "status": "distributing",
+        "progress": 0.9,
+        "message": f"Placing shards across {len(peer_urls)} peer(s)…",
+    }
+    await _broadcast_status(_file_statuses[file_id])
+
+    result = await replication.distribute(
+        file_id=file_id,
+        metadata=metadata,
+        peer_urls=peer_urls,
+        origin_node=NODE_ID,
+        origin_url=OWN_URL,
+        parity_shards=int(metadata.get("parity_shards") or ENCODER_PAR_SHARDS),
+        keep_local_copy=bool(peers_cfg.get("keep_local_copy", False)),
+    )
+    metadata["placement"] = result["summary"]
+    _write_tree_json(file_id, metadata)
+
+    placed = result["placed"]
+    message = (
+        f"Stored across {len(result['summary'])} location(s): "
+        + ", ".join(f"{where.replace('http://', '')}×{count}" for where, count in result["summary"].items())
+    )
+    if result["failures"]:
+        message += f" — {len(result['failures'])} shard(s) stayed local"
+    _file_statuses[file_id] = {
+        "type": "status",
+        "file_id": file_id,
+        "status": "complete",
+        "progress": 1.0,
+        "message": message,
+        "placed": placed,
+    }
+
+
 async def _async_encode_pipeline(
     file_id: str, src_path: str, file_name: str, folder: str = ""
 ) -> None:
@@ -350,6 +444,12 @@ async def _async_encode_pipeline(
     await loop.run_in_executor(
         None, _run_encode_pipeline, file_id, src_path, file_name, folder
     )
+    if _file_statuses.get(file_id, {}).get("status") == "complete":
+        try:
+            await _distribute_shards(file_id)
+        except Exception as exc:
+            # Distribution is best-effort: the file is already stored here.
+            _file_statuses[file_id]["message"] = f"Stored locally; distribution failed: {exc}"
     if file_id in _file_statuses:
         await _broadcast_status(_file_statuses[file_id])
 
@@ -582,6 +682,22 @@ async def delete_file(file_id: str) -> Dict[str, bool]:
     if data is None:
         raise HTTPException(status_code=404, detail="File not found")
 
+    # Ask every peer holding a shard of this file to drop it, before the
+    # metadata that records where they are goes away.
+    peer_urls = {
+        chunk.get("peer")
+        for chunk in data.get("chunk_list", [])
+        if chunk.get("peer")
+    }
+    for peer_url in peer_urls:
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                await client.delete(f"{peer_url}/api/peers/shards/{NODE_ID}/{file_id}")
+        except httpx.HTTPError:
+            # A peer that is down keeps an orphan shard; it is encrypted and
+            # useless without our key, and re-deleting later is harmless.
+            pass
+
     # Remove shards
     shard_dir = PROC_DIR / file_id
     if shard_dir.exists():
@@ -611,26 +727,34 @@ async def download_file(file_id: str) -> StreamingResponse:
 
     # Try decoder binary first
     if DECODER_PATH.exists() and os.access(str(DECODER_PATH), os.X_OK):
-        shard_dir = PROC_DIR / file_id
-        if shard_dir.exists():
-            # Discover the actual shard base name from .0 shard file
-            shard_base = None
-            for f in shard_dir.iterdir():
-                if f.name.endswith(".0"):
-                    shard_base = f.name[:-2]  # strip ".0"
-                    break
+        # Shards are encrypted at rest and some may live on a peer, so they are
+        # collected and decrypted into a staging directory rather than decoded
+        # in place — the decoder reads raw files and would happily reconstruct
+        # garbage from ciphertext.
+        staging, shard_base, problems = await replication.gather_shards(
+            metadata=data,
+            origin_node=NODE_ID,
+            file_id=file_id,
+            fernet=_load_fernet(),
+        )
+        try:
             if shard_base:
+                # Each file records the parameters it was encoded with; using
+                # the current settings instead would corrupt any file stored
+                # before those settings changed.
+                data_shards = int(data.get("data_shards") or ENCODER_DATA_SHARDS)
+                parity_shards = int(data.get("parity_shards") or ENCODER_PAR_SHARDS)
                 out_file = CACHE_DIR / file_id / file_name
                 out_file.parent.mkdir(parents=True, exist_ok=True)
                 result = subprocess.run(
                     [
                         str(DECODER_PATH),
-                        "-data", str(ENCODER_DATA_SHARDS),
-                        "-par", str(ENCODER_PAR_SHARDS),
+                        "-data", str(data_shards),
+                        "-par", str(parity_shards),
                         "-out", str(out_file),
                         shard_base,
                     ],
-                    cwd=str(shard_dir),
+                    cwd=str(staging),
                     capture_output=True,
                     timeout=300,
                 )
@@ -644,17 +768,23 @@ async def download_file(file_id: str) -> StreamingResponse:
                             "Content-Length": str(file_size),
                         },
                     )
+                if problems:
+                    raise HTTPException(
+                        status_code=422,
+                        detail=(
+                            "Could not reconstruct the file. Unavailable shards: "
+                            + "; ".join(problems[:6])
+                        ),
+                    )
+        finally:
+            replication.cleanup(staging)
 
     # Fallback: decrypt and stream the first shard
     if chunk_list:
         chunk_path = Path(chunk_list[0]["path"])
         if chunk_path.exists():
-            key_path = COLLECTIVE_PATH / "key"
-            if key_path.exists() and chunk_list[0].get("encrypted"):
-                from cryptography.fernet import Fernet
-
-                with open(key_path, "rb") as kf:
-                    fernet = Fernet(kf.read().strip())
+            fernet = _load_fernet()
+            if fernet is not None and chunk_list[0].get("encrypted"):
                 with open(chunk_path, "rb") as cf:
                     decrypted = fernet.decrypt(cf.read())
 
@@ -790,6 +920,152 @@ async def register_peer(body: Dict[str, Any]) -> Dict[str, Any]:
 async def peer_files() -> List[Dict[str, Any]]:
     """Expose this node's file metadata for other nodes to sync."""
     return _list_all_tree()
+
+
+# ── shards held for other nodes ─────────────────────────────────────
+#
+# The origin node keeps the metadata; this node just stores bytes on its behalf
+# and hands them back on request. Replicas are namespaced by origin node so two
+# peers can never collide on a file id.
+
+
+def _replica_dir(origin_node: str, file_id: str) -> Path:
+    safe_origin = "".join(ch for ch in origin_node if ch.isalnum() or ch in "-_")[:64]
+    safe_file = "".join(ch for ch in file_id if ch.isalnum() or ch in "-_")[:64]
+    if not safe_origin or not safe_file:
+        raise HTTPException(status_code=400, detail="invalid origin_node or file_id")
+    return PEER_SHARD_DIR / safe_origin / safe_file
+
+
+def _replica_path(origin_node: str, file_id: str, index: int) -> Optional[Path]:
+    directory = _replica_dir(origin_node, file_id)
+    if not directory.is_dir():
+        return None
+    for entry in directory.iterdir():
+        if entry.is_file() and entry.name.rsplit(".", 1)[-1] == str(index):
+            return entry
+    return None
+
+
+@app.post("/api/peers/shards")
+async def receive_shard(
+    shard: UploadFile = File(...),
+    origin_node: str = Form(...),
+    origin_url: str = Form(""),
+    file_id: str = Form(...),
+    index: int = Form(...),
+    name: str = Form(...),
+) -> Dict[str, Any]:
+    """Store one shard on behalf of a peer and report the digest written.
+
+    The origin compares that digest to its own before dropping its copy, so a
+    truncated or corrupted transfer can never cause silent data loss.
+    """
+    config = config_store.load()
+    usage = system_service.collective_usage(COLLECTIVE_PATH, config, _list_all_tree())
+    if not usage["accepting_writes"]:
+        raise HTTPException(status_code=507, detail="node is above its storage watermark")
+
+    safe_name = Path(name).name
+    if not safe_name or safe_name.rsplit(".", 1)[-1] != str(index):
+        raise HTTPException(status_code=400, detail="shard name does not match its index")
+
+    directory = _replica_dir(origin_node, file_id)
+    directory.mkdir(parents=True, exist_ok=True)
+    payload = await shard.read()
+    (directory / safe_name).write_bytes(payload)
+
+    _replica_index_write(origin_node, file_id, origin_url, index, safe_name, len(payload))
+    return {
+        "stored": True,
+        "digest": replication.digest(payload),
+        "bytes": len(payload),
+        "node_id": NODE_ID,
+    }
+
+
+def _replica_index_path() -> Path:
+    return COLLECTIVE_PATH / "replicas.json"
+
+
+def _replica_index_read() -> Dict[str, Any]:
+    path = _replica_index_path()
+    if not path.is_file():
+        return {}
+    try:
+        return json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def _replica_index_write(
+    origin_node: str, file_id: str, origin_url: str, index: int, name: str, size: int
+) -> None:
+    data = _replica_index_read()
+    node = data.setdefault(origin_node, {"origin_url": origin_url, "files": {}})
+    if origin_url:
+        node["origin_url"] = origin_url
+    entry = node["files"].setdefault(file_id, {"shards": {}})
+    entry["shards"][str(index)] = {"name": name, "size": size}
+    try:
+        _replica_index_path().write_text(json.dumps(data, indent=2))
+    except OSError:
+        pass
+
+
+@app.get("/api/peers/shards")
+async def list_replicas() -> Dict[str, Any]:
+    """What this node is holding for other nodes."""
+    data = _replica_index_read()
+    nodes = []
+    total_shards = 0
+    total_bytes = 0
+    for origin_node, node in data.items():
+        shard_count = sum(len(entry["shards"]) for entry in node.get("files", {}).values())
+        byte_count = sum(
+            shard.get("size", 0)
+            for entry in node.get("files", {}).values()
+            for shard in entry["shards"].values()
+        )
+        total_shards += shard_count
+        total_bytes += byte_count
+        nodes.append(
+            {
+                "origin_node": origin_node,
+                "origin_url": node.get("origin_url", ""),
+                "files": len(node.get("files", {})),
+                "shards": shard_count,
+                "bytes": byte_count,
+            }
+        )
+    return {"nodes": nodes, "shards": total_shards, "bytes": total_bytes}
+
+
+@app.get("/api/peers/shards/{origin_node}/{file_id}/{index}")
+async def serve_replica(origin_node: str, file_id: str, index: int):
+    """Hand a stored shard back to the node that owns it."""
+    path = _replica_path(origin_node, file_id, index)
+    if path is None or not path.exists():
+        raise HTTPException(status_code=404, detail="shard not held by this node")
+    return StreamingResponse(open(str(path), "rb"), media_type="application/octet-stream")
+
+
+@app.delete("/api/peers/shards/{origin_node}/{file_id}")
+async def drop_replicas(origin_node: str, file_id: str) -> Dict[str, Any]:
+    """Drop every shard held for one of a peer's files."""
+    directory = _replica_dir(origin_node, file_id)
+    removed = 0
+    if directory.is_dir():
+        removed = len([entry for entry in directory.iterdir() if entry.is_file()])
+        shutil.rmtree(str(directory), ignore_errors=True)
+    data = _replica_index_read()
+    if origin_node in data:
+        data[origin_node].get("files", {}).pop(file_id, None)
+        try:
+            _replica_index_path().write_text(json.dumps(data, indent=2))
+        except OSError:
+            pass
+    return {"dropped": removed}
 
 
 @app.get("/api/peers/chunks/{chunk_id}")
@@ -1042,6 +1318,7 @@ async def system_overview() -> Dict[str, Any]:
         files=_list_all_tree(),
         peers=list(_peers.values()),
         contract_health=_contract_health_safe(),
+        hosted_for_peers=await list_replicas(),
     )
 
 

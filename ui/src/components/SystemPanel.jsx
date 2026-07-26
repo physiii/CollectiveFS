@@ -166,6 +166,12 @@ export default function SystemPanel({ system, config, history, onConfigChanged, 
   const peers = system.peers ?? { total: 0, online: 0, items: [] }
   const durabilityTone = collective.shards_missing > 0 ? 'warning' : 'healthy'
 
+  const hosted = system.hosted_for_peers ?? { nodes: [], shards: 0, bytes: 0 }
+  // Local first, then peers by share size — the story is "where does this live".
+  const placementRows = Object.entries(collective.placement ?? {}).sort(
+    ([a, countA], [b, countB]) => (a === 'local' ? -1 : b === 'local' ? 1 : countB - countA),
+  )
+
   const interfaces = system.network ?? []
   const physicalLinks = interfaces.filter((iface) => !iface.virtual)
   const virtualLinks = interfaces.filter((iface) => iface.virtual)
@@ -214,6 +220,12 @@ export default function SystemPanel({ system, config, history, onConfigChanged, 
           }
           tone={durabilityTone}
         />
+        {collective.shards_remote > 0 && (
+          <StatusPill
+            label={`${collective.shards_local} here · ${collective.shards_remote} on peers`}
+            tone="healthy"
+          />
+        )}
         <StatusPill
           label={system.swap ? `swap ${fmtPercent(system.swap.percent)}` : 'swap disabled'}
           tone={system.swap?.status ?? 'healthy'}
@@ -323,6 +335,53 @@ export default function SystemPanel({ system, config, history, onConfigChanged, 
               <MiniStat label="Missing" value={String(collective.shards_missing ?? 0)} tone={durabilityTone} />
               <MiniStat label="Overhead" value={erasure.overhead_percent != null ? `${erasure.overhead_percent}%` : 'n/a'} />
             </div>
+          </div>
+        </SkillPanel>
+
+        <SkillPanel title="Shard Placement">
+          <div className="preview-stack">
+            <div className="mini-stat-grid three">
+              <MiniStat label="Held here" value={String(collective.shards_local ?? 0)} />
+              <MiniStat
+                label="On peers"
+                value={String(collective.shards_remote ?? 0)}
+                tone={collective.shards_remote > 0 ? 'healthy' : undefined}
+              />
+              <MiniStat label="Stored for peers" value={String(hosted.shards ?? 0)} />
+            </div>
+
+            <span className="metric-detail">Our shards, by location</span>
+            <div className="compact-list">
+              {placementRows.length === 0 && (
+                <p className="muted">Nothing stored yet.</p>
+              )}
+              {placementRows.map(([where, count]) => (
+                <div className="compact-row" key={where}>
+                  <span className={`row-dot ${where === 'local' ? 'ok' : 'warn'}`} />
+                  <span className="row-main">{where === 'local' ? 'This node' : where.replace(/^https?:\/\//, '')}</span>
+                  <span className="row-sub">{count} shards</span>
+                  <StatusPill label={where === 'local' ? 'local' : 'peer'} tone={where === 'local' ? 'healthy' : 'neutral'} />
+                </div>
+              ))}
+            </div>
+
+            {hosted.nodes?.length > 0 && (
+              <>
+                <span className="metric-detail">Shards we store for other nodes</span>
+                <div className="compact-list">
+                  {hosted.nodes.map((node) => (
+                    <div className="compact-row" key={node.origin_node}>
+                      <span className="row-dot ok" />
+                      <span className="row-main">
+                        {node.origin_url?.replace(/^https?:\/\//, '') || node.origin_node.slice(0, 12)}
+                      </span>
+                      <span className="row-sub">{node.shards} shards</span>
+                      <span className="row-sub">{fmtBytes(node.bytes)}</span>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
           </div>
         </SkillPanel>
 

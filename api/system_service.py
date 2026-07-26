@@ -228,14 +228,27 @@ def collective_usage(
         max(quota - used - device_free, 0) if device_free is not None and quota else 0
     )
 
+    # The `<base>.size` sidecar is not a shard; counting it inflates every
+    # total by one. A shard verified onto a peer still counts as available —
+    # that is the point of distributing it.
     shard_total = 0
     shard_available = 0
+    shard_local = 0
+    placement: Dict[str, int] = {}
     for item in files:
         for chunk in item.get("chunk_list", []) or []:
+            chunk_path = chunk.get("path") or ""
+            if chunk_path.endswith(".size"):
+                continue
             shard_total += 1
-            chunk_path = chunk.get("path")
-            if chunk_path and Path(chunk_path).exists():
+            here = bool(chunk_path) and Path(chunk_path).exists()
+            peer = chunk.get("peer")
+            if here:
+                shard_local += 1
+            if here or peer:
                 shard_available += 1
+            where = peer if (peer and not here) else "local"
+            placement[where] = placement.get(where, 0) + 1
 
     data_shards = int(config.get("erasure", {}).get("data_shards") or 0)
     parity_shards = int(config.get("erasure", {}).get("parity_shards") or 0)
@@ -261,7 +274,10 @@ def collective_usage(
         "files": len(files),
         "shards_total": shard_total,
         "shards_available": shard_available,
+        "shards_local": shard_local,
+        "shards_remote": max(shard_available - shard_local, 0),
         "shards_missing": max(shard_total - shard_available, 0),
+        "placement": placement,
         "durability_percent": durability,
         "data_shards": data_shards,
         "parity_shards": parity_shards,
@@ -278,6 +294,7 @@ def build_overview(
     files: List[Dict[str, Any]],
     peers: List[Dict[str, Any]],
     contract_health: Optional[Dict[str, Any]] = None,
+    hosted_for_peers: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Assemble the full System & Infrastructure payload."""
     collective = collective_usage(root, config, files)
@@ -308,6 +325,7 @@ def build_overview(
     )
 
     online_peers = [peer for peer in peers if peer.get("healthy")]
+    hosted = hosted_for_peers or {}
 
     return {
         "hostname": socket.gethostname(),
@@ -326,6 +344,13 @@ def build_overview(
             "total": len(peers),
             "online": len(online_peers),
             "items": peers,
+        },
+        # Two directions worth telling apart: shards of ours sitting on peers,
+        # and shards of theirs sitting here.
+        "hosted_for_peers": {
+            "nodes": hosted.get("nodes", []),
+            "shards": hosted.get("shards", 0),
+            "bytes": hosted.get("bytes", 0),
         },
         "contracts": contract_health or {},
         "erasure": {

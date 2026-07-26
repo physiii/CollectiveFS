@@ -46,6 +46,14 @@ DEFAULT_CONFIG: Dict[str, Any] = {
         "challenges_enabled": True,
         "max_peers": 32,
     },
+    "peers": {
+        # Ship shards to peers after encoding so a file genuinely lives on more
+        # than one machine.
+        "distribute_shards": True,
+        # Keep the origin's copy as well. Off by default: keeping everything
+        # locally means nothing is really distributed.
+        "keep_local_copy": False,
+    },
     "agent": {
         "provider": "codewhale",
         "model": "",
@@ -109,6 +117,14 @@ FIELD_SPECS: Dict[str, Dict[str, Any]] = {
         "min": 1,
         "max": 512,
         "label": "Maximum peer contracts",
+    },
+    "peers.distribute_shards": {
+        "type": "bool",
+        "label": "Distribute shards to peers",
+    },
+    "peers.keep_local_copy": {
+        "type": "bool",
+        "label": "Keep a local copy of distributed shards",
     },
     "agent.provider": {
         "type": "enum",

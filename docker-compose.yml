@@ -2,10 +2,10 @@ services:
   collectivefs:
     build: .
     ports:
-      - "8010:8000"
+      - "${CFS_PORT:-8010}:8000"
     labels:
       # Custodian picks this up to link the app card at its real address.
-      com.custodian.app.url: "http://192.168.1.40:8010/"
+      com.custodian.app.url: "${CFS_OWN_URL:-http://localhost:8010}/"
     volumes:
       - collective_data:/data/.collective
       # Agent CLIs come from the host so the section chats can drive a real
@@ -20,17 +20,23 @@ services:
       - COLLECTIVE_PATH=/data/.collective
       - ENCODER_PATH=/app/lib/encoder
       - DECODER_PATH=/app/lib/decoder
+      # How peers reach this node. Required before it can hand shards out —
+      # a peer has to be able to hand them back.
+      - OWN_URL=${CFS_OWN_URL:-}
+      # Comma-separated peer base URLs, e.g. http://192.168.1.43:8010
+      - PEER_URLS=${CFS_PEER_URLS:-}
       # Which agent backend the section chats use by default. Switchable at
       # runtime from the UI; codewhale | claude | codex | builtin.
       - AGENT_PROVIDER=${AGENT_PROVIDER:-codewhale}
       # Container paths first: the mounted host bin dir also holds host-python
       # entry points (uvicorn among them) whose interpreters do not exist here.
-      - PATH=/usr/local/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin:/opt/agent-bin:/opt/nvm/versions/node/v22.22.2/bin
+      # The node version differs per host, so it comes from .env.
+      - PATH=/usr/local/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin:/opt/agent-bin:/opt/nvm/versions/node/${CFS_NODE_VERSION:-v22.22.2}/bin
       # The host shims re-exec through an agent-scope wrapper that lives outside
       # this container; skip it and run the real binaries directly.
       - AGENT_SCOPE_DISABLE=1
-      - REAL_CODEWHALE_BIN=/opt/nvm/versions/node/v22.22.2/bin/codewhale
-      - REAL_CODEX_BIN=/opt/nvm/versions/node/v22.22.2/bin/codex
+      - REAL_CODEWHALE_BIN=/opt/nvm/versions/node/${CFS_NODE_VERSION:-v22.22.2}/bin/codewhale
+      - REAL_CODEX_BIN=/opt/nvm/versions/node/${CFS_NODE_VERSION:-v22.22.2}/bin/codex
       # Provider credentials are passed through from the launching shell (or a
       # local .env, which is gitignored). Nothing is baked into the image.
       - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
