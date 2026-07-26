@@ -535,10 +535,30 @@ def ui_parity(host: Host) -> Dict[str, Any]:
     are counted and reported rather than folded into the pass/fail, since they
     are a property of the stored data, not a disagreement between the views.
     """
-    try:
-        tree = host.api_get("/api/files/tree?scope=network")
-    except httpx.HTTPError:
+    def sample():
+        try:
+            tree = host.api_get("/api/files/tree?scope=network")
+        except httpx.HTTPError:
+            return None, None
+        listing = host.run(
+            f"cd {host.mount} && find . -type f -printf '%P\\n' 2>/dev/null | sort",
+            timeout=300,
+        ).stdout.splitlines()
+        # splitlines, not split: real filenames contain spaces, and splitting on
+        # whitespace shatters them into fragments that match nothing.
+        return tree, sorted({line for line in listing if line.strip()})
+
+    # The mount holds a short-lived cache of the tree, so a listing taken right
+    # after a burst of deletes can still show files the node has dropped. Sample
+    # twice past that window rather than reporting a divergence that is only a
+    # measurement-order artifact.
+    tree, mount_paths = sample()
+    if tree is None:
         return {"checked": False}
+    time.sleep(3)
+    retry_tree, retry_mount = sample()
+    if retry_tree is not None:
+        tree, mount_paths = retry_tree, retry_mount
 
     entries = tree.get("files", [])
     paths = [
@@ -551,10 +571,6 @@ def ui_parity(host: Host) -> Dict[str, Any]:
     collisions = {path: count for path, count in seen.items() if count > 1}
 
     ui_paths = sorted(seen)
-    listing = host.run(
-        f"cd {host.mount} && find . -type f -printf '%P\\n' 2>/dev/null | sort", timeout=300
-    ).stdout.split()
-    mount_paths = sorted(set(listing))
 
     return {
         "checked": True,

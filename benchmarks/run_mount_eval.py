@@ -569,6 +569,18 @@ def derive_observations(data: Dict[str, Any]) -> List[str]:
                 f"in {ms(median)} (median)."
             )
 
+    for name, info in nodes.items():
+        tree = info.get("real_tree")
+        if not tree or tree.get("error") or not tree.get("identical"):
+            continue
+        notes.append(
+            f"A real {tree['files']}-file tree ({human_bytes(tree['bytes'])}, mean file "
+            f"{human_bytes(tree['mean_file_bytes'])}) copied into **{name}** in "
+            f"{tree['write_s']}s and read back in {tree['read_s']}s, verified "
+            "byte-for-byte with `diff -r`. At this file size the cost is per-file, "
+            f"not per-byte: {tree.get('write_files_per_s')} files/s written."
+        )
+
     contracts = data.get("contracts") or {}
     if contracts.get("challenges_passed"):
         issue = contracts.get("issue", {})
