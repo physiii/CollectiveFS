@@ -239,6 +239,7 @@ over ssh. What it measures:
 | Shard distribution | Placement, storage expansion, shards held for peers |
 | Fault tolerance | `--degraded`: read with the peer holding remote shards stopped |
 | Peer contracts | `--contracts`: proof-of-storage challenge latency and QoS |
+| Real directory tree | `--real-tree DIR`: copies a genuine tree in, reads it back, `diff -r` |
 | Quota saturation | `--saturate`: drives past the write cutoff on a temporary quota |
 | Console/mount parity | The UI and the mount must list identical file sets |
 

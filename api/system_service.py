@@ -212,7 +212,13 @@ def collective_usage(
     watermark = int(config.get("storage", {}).get("high_watermark_percent") or 90)
 
     shards_root = root / "proc"
+    # Everything under proc/ occupies the pledged quota, including shards held
+    # for other nodes — that is what actually consumes the disk. But our own
+    # storage overhead has to be measured against our own files only, or
+    # hosting a peer's data makes our expansion ratio meaningless.
     used = _dir_size(shards_root)
+    hosted = _dir_size(shards_root / "_peers")
+    own = max(used - hosted, 0)
     logical = sum(int(item.get("size") or 0) for item in files)
     percent = (used / quota * 100) if quota else None
 
@@ -261,6 +267,8 @@ def collective_usage(
         "quota_bytes": quota,
         "reserve_bytes": reserve,
         "used_bytes": used,
+        "own_bytes": own,
+        "hosted_bytes": hosted,
         "logical_bytes": logical,
         "free_bytes": max(quota - used, 0),
         "device_total_bytes": device_total,
@@ -270,7 +278,8 @@ def collective_usage(
         "used_percent": round(percent, 1) if percent is not None else None,
         "high_watermark_percent": watermark,
         "accepting_writes": percent is None or percent < watermark,
-        "expansion_ratio": round(used / logical, 2) if logical else None,
+        # Our shards against our data — the erasure overhead, nothing else.
+        "expansion_ratio": round(own / logical, 2) if logical else None,
         "files": len(files),
         "shards_total": shard_total,
         "shards_available": shard_available,

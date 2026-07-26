@@ -321,11 +321,18 @@ def build_report(data: Dict[str, Any]) -> str:
             str(placement.get("shards_remote", 0)),
             str(hosted.get("shards", 0)),
             str(placement.get("shards_missing", 0)),
-            f"{placement.get('expansion_ratio', '—')}×",
+            human_bytes(placement.get("own_bytes")),
+            human_bytes(placement.get("hosted_bytes")),
+            f"{placement.get('expansion_ratio', '—')}x",
         ])
     parts.append(table(
         ["Node", "Files", "Shards", "Held here", "On peers", "Stored for peers",
-         "Missing", "Storage expansion"], rows))
+         "Missing", "Own shards", "Hosted for peers", "Expansion"], rows))
+    parts.append(
+        "\n> Expansion is our shards against our own data — the erasure-coding "
+        "overhead. Data stored for peers occupies the quota but is counted "
+        "separately, since it is not our storage cost.\n"
+    )
 
     degraded = data.get("degraded")
     if degraded:

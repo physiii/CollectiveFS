@@ -43,6 +43,23 @@ def test_status_thresholds(percent, expected):
 # ── quota accounting ────────────────────────────────────────────────
 
 
+def test_hosted_shards_do_not_distort_our_expansion_ratio(tmp_path):
+    """Storing a peer's data must not look like our own storage overhead."""
+    files = [make_file(tmp_path, "f1", size=1000, shard_sizes=[200] * 6)]
+    hosted = tmp_path / "proc" / "_peers" / "other-node" / "their-file"
+    hosted.mkdir(parents=True, exist_ok=True)
+    (hosted / "theirs.0").write_bytes(b"x" * 50_000)
+
+    usage = collective_usage(tmp_path, config(), files)
+
+    assert usage["hosted_bytes"] == 50_000
+    assert usage["own_bytes"] == 1200
+    # Quota accounting still counts everything on disk.
+    assert usage["used_bytes"] == 51_200
+    # Overhead is measured against our own files only.
+    assert usage["expansion_ratio"] == 1.2
+
+
 def test_usage_counts_on_disk_shards_not_logical_size(tmp_path):
     files = [make_file(tmp_path, "f1", size=1000, shard_sizes=[200] * 6)]
     usage = collective_usage(tmp_path, config(), files)
