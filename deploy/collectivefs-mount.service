@@ -13,6 +13,10 @@ Group=andy
 # files, so it is the only thing that has to match across the fleet.
 EnvironmentFile=/etc/collectivefs/mount.env
 
+# Clear any stale endpoint first: on `systemctl restart` the old mount can
+# outlive the stop, and then even `mkdir -p` fails with ENOTCONN, taking the
+# start down with it. The leading '-' means "nothing mounted" is not an error.
+ExecStartPre=-/bin/fusermount3 -u /media/collectivefs
 ExecStartPre=/bin/mkdir -p /media/collectivefs
 # --token= rather than --token: a URL-safe token may begin with '-', which the
 # argument parser would otherwise read as another flag.
