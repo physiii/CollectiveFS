@@ -103,6 +103,11 @@ class OpStats:
             return payload
 
 
+# Ordinary POSIX answers, not failures: a shell testing for a file it expects to
+# be missing would otherwise show up as a filesystem error rate.
+_EXPECTED_ERRNOS = {errno.ENOENT, errno.ENOTEMPTY, errno.EEXIST, errno.EISDIR, errno.ENOTDIR}
+
+
 def timed(name: str):
     """Wrap a FUSE handler so every call lands in the metrics."""
 
@@ -112,6 +117,9 @@ def timed(name: str):
             failed = False
             try:
                 return await func(self, *args, **kwargs)
+            except pyfuse3.FUSEError as exc:
+                failed = exc.errno not in _EXPECTED_ERRNOS
+                raise
             except Exception:
                 failed = True
                 raise
