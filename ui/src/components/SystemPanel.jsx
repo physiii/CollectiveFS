@@ -1,14 +1,25 @@
 import { useEffect, useMemo, useState } from 'react'
 
 import { getConfigAudit, putConfig } from '../lib/api'
+
 import { fmtBytes, fmtDate, fmtPercent, fmtUptime, statusTone } from '../lib/format'
 import {
   CpuHistoryChart,
+  FilesystemOpsChart,
+  FilesystemThroughputChart,
   MemoryHistoryChart,
   NetworkHistoryChart,
   StorageHistoryChart,
 } from './SystemCharts'
 import { DiskMetric, GaugeMetric, MetricBar, MiniStat, SkillPanel, StatusPill } from './primitives'
+
+function fmtRate(value) {
+  const rate = Number(value) || 0
+  if (rate >= 1e9) return `${(rate / 1e9).toFixed(2)} GB/s`
+  if (rate >= 1e6) return `${(rate / 1e6).toFixed(1)} MB/s`
+  if (rate >= 1e3) return `${(rate / 1e3).toFixed(1)} KB/s`
+  return `${rate.toFixed(0)} B/s`
+}
 
 // Fields exposed as direct controls. The chat can reach every field in the
 // schema; these are the ones worth a permanent widget.
@@ -167,6 +178,11 @@ export default function SystemPanel({ system, config, history, onConfigChanged, 
   const durabilityTone = collective.shards_missing > 0 ? 'warning' : 'healthy'
 
   const hosted = system.hosted_for_peers ?? { nodes: [], shards: 0, bytes: 0 }
+  const filesystem = system.filesystem ?? { mounts: [], series: [], operations: [], active: false }
+  const fsTotals = filesystem.totals ?? {}
+  // The node already keeps a rolling window per mount, so chart it as reported
+  // rather than re-deriving rates from the polling loop.
+  const fsSeries = filesystem.series ?? []
   // Local first, then peers by share size — the story is "where does this live".
   const placementRows = Object.entries(collective.placement ?? {}).sort(
     ([a, countA], [b, countB]) => (a === 'local' ? -1 : b === 'local' ? 1 : countB - countA),
@@ -335,6 +351,69 @@ export default function SystemPanel({ system, config, history, onConfigChanged, 
               <MiniStat label="Missing" value={String(collective.shards_missing ?? 0)} tone={durabilityTone} />
               <MiniStat label="Overhead" value={erasure.overhead_percent != null ? `${erasure.overhead_percent}%` : 'n/a'} />
             </div>
+          </div>
+        </SkillPanel>
+
+        <SkillPanel title="Mounted Filesystem">
+          <div className="preview-stack">
+            {!filesystem.active && (
+              <p className="muted">
+                No mount is reporting. Start <code>collectivefs-mount.service</code> to serve this
+                account at <code>/media/collectivefs</code>.
+              </p>
+            )}
+            <div className="mini-stat-grid three">
+              <MiniStat
+                label="Throughput"
+                value={`${fmtRate(fsTotals.read_bps)} / ${fmtRate(fsTotals.write_bps)}`}
+                tone={filesystem.active ? 'healthy' : undefined}
+              />
+              <MiniStat label="Operations" value={`${(fsTotals.ops_per_sec ?? 0).toFixed(1)}/s`} />
+              <MiniStat
+                label="Errors"
+                value={String(fsTotals.errors ?? 0)}
+                tone={fsTotals.errors ? 'warning' : 'healthy'}
+              />
+            </div>
+
+            <span className="metric-detail">Read and write throughput</span>
+            <FilesystemThroughputChart data={fsSeries} />
+            <span className="metric-detail">Operations per second and average latency</span>
+            <FilesystemOpsChart data={fsSeries} />
+
+            {filesystem.mounts?.length > 0 && (
+              <div className="compact-list">
+                {filesystem.mounts.map((mount) => (
+                  <div className="compact-row" key={`${mount.node}-${mount.mountpoint}`}>
+                    <span className={`row-dot ${Date.now() / 1000 - mount.last_seen < 30 ? 'ok' : 'warn'}`} />
+                    <span className="row-main">{mount.mountpoint}</span>
+                    <span className="row-sub">{mount.node}</span>
+                    <span className="row-sub">{mount.files ?? 0} files</span>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {filesystem.operations?.length > 0 && (
+              <>
+                <span className="metric-detail">Slowest operations in the window</span>
+                <div className="compact-list">
+                  {[...filesystem.operations]
+                    .sort((a, b) => b.avg_ms - a.avg_ms)
+                    .slice(0, full ? 8 : 4)
+                    .map((operation) => (
+                      <div className="compact-row" key={operation.op}>
+                        <span className={`row-dot ${operation.errors ? 'warn' : 'ok'}`} />
+                        <span className="row-main">{operation.op}</span>
+                        <span className="row-sub">{operation.count} calls</span>
+                        <span className="row-sub">
+                          {operation.avg_ms}ms avg · {operation.max_ms}ms peak
+                        </span>
+                      </div>
+                    ))}
+                </div>
+              </>
+            )}
           </div>
         </SkillPanel>
 

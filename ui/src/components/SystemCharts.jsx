@@ -122,6 +122,36 @@ export function NetworkHistoryChart({ data }) {
   )
 }
 
+export function FilesystemThroughputChart({ data }) {
+  if (data.length < 2) return <p className="muted chart-empty">Collecting data…</p>
+  return (
+    <RealtimeAreaChart
+      data={data}
+      lines={[
+        { key: 'read_bps', color: '#33d06b', name: 'Read' },
+        { key: 'write_bps', color: '#e8a030', name: 'Write' },
+      ]}
+      unit=""
+      valueFormat={fmtRate}
+    />
+  )
+}
+
+export function FilesystemOpsChart({ data }) {
+  if (data.length < 2) return <p className="muted chart-empty">Collecting data…</p>
+  return (
+    <RealtimeAreaChart
+      data={data}
+      lines={[
+        { key: 'ops_per_sec', color: '#5aa8d6', name: 'Operations' },
+        { key: 'avg_latency_ms', color: '#d49a3a', name: 'Latency ms' },
+      ]}
+      unit=""
+      valueFormat={(value) => (value >= 100 ? value.toFixed(0) : value.toFixed(1))}
+    />
+  )
+}
+
 export function StorageHistoryChart({ data }) {
   if (data.length < 2) return <p className="muted chart-empty">Collecting data…</p>
   return (
