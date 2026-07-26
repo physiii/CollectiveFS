@@ -25,7 +25,7 @@ from fastapi import (
     WebSocketDisconnect,
 )
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from sse_starlette.sse import EventSourceResponse
 
@@ -1012,14 +1012,16 @@ async def download_file(file_id: str, request: Request) -> StreamingResponse:
                     timeout=300,
                 )
                 if result.returncode == 0 and out_file.exists():
-                    file_size = out_file.stat().st_size
-                    return StreamingResponse(
-                        open(str(out_file), "rb"),
+                    # FileResponse, not StreamingResponse(open(...)): iterating a
+                    # file object yields *newline-delimited* chunks, so binary
+                    # data becomes hundreds of thousands of ~256-byte sends,
+                    # each with a threadpool hop. That alone made a 64 MB read
+                    # take 34s instead of 1.6s. FileResponse sends fixed blocks
+                    # and adds Content-Length and range support.
+                    return FileResponse(
+                        str(out_file),
                         media_type="application/octet-stream",
-                        headers={
-                            "Content-Disposition": f'attachment; filename="{file_name}"',
-                            "Content-Length": str(file_size),
-                        },
+                        filename=file_name,
                     )
                 if problems:
                     raise HTTPException(
@@ -1041,23 +1043,18 @@ async def download_file(file_id: str, request: Request) -> StreamingResponse:
                 with open(chunk_path, "rb") as cf:
                     decrypted = fernet.decrypt(cf.read())
 
-                async def _iter_bytes():
-                    yield decrypted
-
-                return StreamingResponse(
-                    _iter_bytes(),
+                return Response(
+                    content=decrypted,
                     media_type="application/octet-stream",
                     headers={
                         "Content-Disposition": f'attachment; filename="{file_name}"'
                     },
                 )
             else:
-                return StreamingResponse(
-                    open(str(chunk_path), "rb"),
+                return FileResponse(
+                    str(chunk_path),
                     media_type="application/octet-stream",
-                    headers={
-                        "Content-Disposition": f'attachment; filename="{file_name}"'
-                    },
+                    filename=file_name,
                 )
 
     raise HTTPException(
@@ -1333,7 +1330,7 @@ async def serve_replica(origin_node: str, file_id: str, index: int):
     path = _replica_path(origin_node, file_id, index)
     if path is None or not path.exists():
         raise HTTPException(status_code=404, detail="shard not held by this node")
-    return StreamingResponse(open(str(path), "rb"), media_type="application/octet-stream")
+    return FileResponse(str(path), media_type="application/octet-stream")
 
 
 @app.delete("/api/peers/shards/{origin_node}/{file_id}")
@@ -1368,9 +1365,8 @@ async def serve_chunk(chunk_id: str):
             if c.get("id") == chunk_id:
                 chunk_path = Path(c["path"])
                 if chunk_path.exists():
-                    return StreamingResponse(
-                        open(str(chunk_path), "rb"),
-                        media_type="application/octet-stream",
+                    return FileResponse(
+                        str(chunk_path), media_type="application/octet-stream"
                     )
     raise HTTPException(status_code=404, detail="Chunk not found")
 
