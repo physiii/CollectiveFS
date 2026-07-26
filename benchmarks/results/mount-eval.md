@@ -1,5 +1,5 @@
 # CollectiveFS — Performance and Evaluation Report
-Generated 2026-07-26 22:16 UTC · harness `benchmarks/run_mount_eval.py` · duration 9.6 min
+Generated 2026-07-26 22:33 UTC · harness `benchmarks/run_mount_eval.py` · duration 11.9 min
 Every figure below was measured against the live cluster through the `/media/collectivefs` mount, with erasure coding, encryption, shard distribution and peer routing all in the path. Nothing is extrapolated; where a measurement was not possible the row says so.
 
 ## 1. Compute under test
@@ -10,15 +10,15 @@ Every figure below was measured against the live cluster through the `/media/col
 
 | Node | Node ID | Pledged quota | Used | Backing disk | Free on disk | Media | Erasure |
 |---|---|---|---|---|---|---|---|
-| **sonic** | 78448c8f | 1.0 TB | 255 MB | 3.6 TB | 1.5 TB | Samsung SSD 990 EVO Plus 4TB (SSD/NVMe) | 8+4 |
-| **office** | bc230253 | 1.0 TB | 4.8 GB | 3.6 TB | 1.3 TB | Samsung SSD 990 EVO Plus 4TB (SSD/NVMe) | 8+4 |
+| **sonic** | 78448c8f | 1.0 TB | 423 MB | 3.6 TB | 1.5 TB | Samsung SSD 990 EVO Plus 4TB (SSD/NVMe) | 8+4 |
+| **office** | bc230253 | 1.0 TB | 5.0 GB | 3.6 TB | 1.3 TB | Samsung SSD 990 EVO Plus 4TB (SSD/NVMe) | 8+4 |
 
 ### Interconnect
 | Measurement | Value |
 |---|---|
-| ICMP round trip | 0.229/0.441/0.569/0.113 ms |
-| Node API round trip (median) | 12.5 ms |
-| Shell/ssh invocation overhead (median) | 272.3 ms |
+| ICMP round trip | 0.102/0.147/0.193/0.034 ms |
+| Node API round trip (median) | 8.7 ms |
+| Shell/ssh invocation overhead (median) | 243.9 ms |
 
 > Operation timings taken on the remote node include the shell invocation overhead above. Subtract it when comparing a remote single-operation latency against a local one.
 
@@ -28,20 +28,20 @@ Each size was written through the mount and read back, with a SHA-256 check on e
 ### sonic
 | Size | Bytes | Write | Write median | Read | Read median | SHA-256 verified |
 |---|---|---|---|---|---|---|
-| 4KB | 4.0 KB | 0.2 MB/s | 9.2 ms | 0.0 MB/s | 95.2 ms | 3/3 |
-| 64KB | 64.0 KB | 11.2 MB/s | 5.6 ms | 0.6 MB/s | 106.5 ms | 3/3 |
-| 1MB | 1.0 MB | 95.1 MB/s | 8.5 ms | 7.7 MB/s | 131.7 ms | 3/3 |
-| 8MB | 8.0 MB | 319.5 MB/s | 26.6 ms | 23.8 MB/s | 338.4 ms | 3/3 |
-| 64MB | 64.0 MB | 271.9 MB/s | 220.3 ms | 0.9 MB/s | 76.18 s | 3/3 |
+| 4KB | 4.0 KB | 0.1 MB/s | 4.7 ms | 0.0 MB/s | 285.8 ms | 3/3 |
+| 64KB | 64.0 KB | 13.1 MB/s | 4.7 ms | 0.2 MB/s | 282.6 ms | 3/3 |
+| 1MB | 1.0 MB | 121.3 MB/s | 7.3 ms | 3.0 MB/s | 323.6 ms | 3/3 |
+| 8MB | 8.0 MB | 339.9 MB/s | 23.6 ms | 22.5 MB/s | 360.1 ms | 3/3 |
+| 64MB | 64.0 MB | 257.8 MB/s | 258.7 ms | 1.0 MB/s | 63.67 s | 3/3 |
 
 ### office
 | Size | Bytes | Write | Write median | Read | Read median | SHA-256 verified |
 |---|---|---|---|---|---|---|
-| 4KB | 4.0 KB | 0.0 MB/s | 295.7 ms | 0.0 MB/s | 313.3 ms | 3/3 |
-| 64KB | 64.0 KB | 0.2 MB/s | 280.8 ms | 0.2 MB/s | 324.6 ms | 3/3 |
-| 1MB | 1.0 MB | 3.5 MB/s | 283.0 ms | 2.1 MB/s | 477.5 ms | 3/3 |
-| 8MB | 8.0 MB | 26.6 MB/s | 302.4 ms | 24.2 MB/s | 336.2 ms | 3/3 |
-| 64MB | 64.0 MB | 179.8 MB/s | 353.8 ms | 2.7 MB/s | 23.44 s | 3/3 |
+| 4KB | 4.0 KB | 0.0 MB/s | 308.4 ms | 0.0 MB/s | 548.4 ms | 3/3 |
+| 64KB | 64.0 KB | 0.2 MB/s | 327.2 ms | 0.1 MB/s | 532.8 ms | 3/3 |
+| 1MB | 1.0 MB | 3.1 MB/s | 313.0 ms | 2.4 MB/s | 414.3 ms | 3/3 |
+| 8MB | 8.0 MB | 25.3 MB/s | 316.9 ms | 21.2 MB/s | 378.3 ms | 3/3 |
+| 64MB | 64.0 MB | 171.1 MB/s | 370.2 ms | 2.4 MB/s | 26.69 s | 3/3 |
 
 ## 3. Operation latency
 Per-operation cost as a shell experiences it. These are whole-command timings, so each includes process startup.
@@ -49,83 +49,83 @@ Per-operation cost as a shell experiences it. These are whole-command timings, s
 ### sonic
 | Operation | Samples | Median | p95 | Max | Failures |
 |---|---|---|---|---|---|
-| create (touch) | 12 | 3.1 ms | 3.5 ms | 81.5 ms | 0 |
-| stat | 12 | 5.4 ms | 7.5 ms | 13.8 ms | 0 |
-| readdir | 12 | 5.6 ms | 8.3 ms | 10.5 ms | 0 |
-| rename | 12 | 71.0 ms | 383.0 ms | 480.8 ms | 0 |
-| read small | 9 | 29.0 ms | 35.3 ms | 35.3 ms | 3 |
-| copy small | 9 | 7.1 ms | 16.0 ms | 16.0 ms | 3 |
-| mkdir | 12 | 69.2 ms | 271.3 ms | 332.9 ms | 0 |
-| rmdir | 12 | 67.6 ms | 74.1 ms | 76.3 ms | 0 |
-| unlink | 12 | 61.3 ms | 69.2 ms | 71.6 ms | 0 |
+| create (touch) | 12 | 2.4 ms | 2.8 ms | 189.6 ms | 0 |
+| stat | 12 | 3.9 ms | 7.2 ms | 12.0 ms | 0 |
+| readdir | 12 | 4.5 ms | 5.3 ms | 5.4 ms | 0 |
+| rename | 12 | 138.8 ms | 1.25 s | 1.77 s | 0 |
+| read small | 9 | 24.3 ms | 34.3 ms | 34.3 ms | 3 |
+| copy small | 9 | 7.0 ms | 12.6 ms | 12.6 ms | 3 |
+| mkdir | 12 | 132.5 ms | 721.5 ms | 1.67 s | 0 |
+| rmdir | 12 | 143.8 ms | 152.9 ms | 159.1 ms | 0 |
+| unlink | 12 | 121.0 ms | 133.5 ms | 138.7 ms | 0 |
 
 ### office
 | Operation | Samples | Median | p95 | Max | Failures |
 |---|---|---|---|---|---|
-| create (touch) | 12 | 280.3 ms | 292.6 ms | 305.2 ms | 0 |
-| stat | 12 | 257.2 ms | 278.8 ms | 282.8 ms | 0 |
-| readdir | 12 | 287.1 ms | 297.0 ms | 323.7 ms | 0 |
-| rename | 12 | 304.1 ms | 339.5 ms | 346.2 ms | 0 |
-| read small | 12 | 270.9 ms | 296.1 ms | 305.9 ms | 0 |
-| copy small | 12 | 299.1 ms | 308.6 ms | 310.7 ms | 0 |
-| mkdir | 12 | 292.1 ms | 300.0 ms | 300.8 ms | 0 |
-| rmdir | 12 | 300.8 ms | 306.5 ms | 312.6 ms | 0 |
-| unlink | 12 | 296.5 ms | 315.9 ms | 318.7 ms | 0 |
+| create (touch) | 12 | 428.7 ms | 719.1 ms | 736.7 ms | 0 |
+| stat | 12 | 251.1 ms | 333.3 ms | 473.4 ms | 0 |
+| readdir | 12 | 306.0 ms | 320.1 ms | 325.9 ms | 0 |
+| rename | 12 | 313.5 ms | 319.3 ms | 392.2 ms | 0 |
+| read small | 12 | 268.9 ms | 325.9 ms | 339.3 ms | 0 |
+| copy small | 12 | 439.6 ms | 730.6 ms | 930.7 ms | 0 |
+| mkdir | 12 | 319.2 ms | 338.0 ms | 1.01 s | 0 |
+| rmdir | 12 | 326.7 ms | 360.7 ms | 368.4 ms | 0 |
+| unlink | 12 | 323.3 ms | 330.4 ms | 333.5 ms | 0 |
 
 ## 4. Kernel-level operation mix
 Reported by the FUSE layer itself, so these exclude shell startup and show the true cost of each filesystem call.
 
 ### sonic
-Window 898s · 27638 operations · read 0.3 MB/s · write 1.3 MB/s · 3 errors
+Window 894s · 18860 operations · read 0.3 MB/s · write 0.7 MB/s · 1 errors
 
 | FUSE operation | Calls | Mean | Peak | Errors |
 |---|---|---|---|---|
-| write | 10097 | 0.14 ms | 14.71 ms | 0 |
-| lookup | 6485 | 10.23 ms | 6611.4 ms | 0 |
-| getattr | 5580 | 1.33 ms | 319.62 ms | 0 |
-| read | 1833 | 261.24 ms | 73465.9 ms | 0 |
-| release | 1376 | 382.1 ms | 3502.4 ms | 3 |
-| open | 855 | 0.01 ms | 0.14 ms | 0 |
-| create | 522 | 0.12 ms | 0.67 ms | 0 |
-| unlink | 496 | 26.8 ms | 757.51 ms | 0 |
-| readdir | 270 | 124.58 ms | 13203.72 ms | 0 |
-| statfs | 74 | 471.8 ms | 18188.36 ms | 0 |
-| mkdir | 19 | 343.25 ms | 2006.94 ms | 0 |
-| rmdir | 19 | 18.73 ms | 31.61 ms | 0 |
-| rename | 12 | 130.04 ms | 473.75 ms | 0 |
+| lookup | 5151 | 21.55 ms | 16121.2 ms | 0 |
+| write | 4914 | 0.14 ms | 3.6 ms | 0 |
+| getattr | 4504 | 2.04 ms | 471.61 ms | 0 |
+| read | 1638 | 246.1 ms | 60442.66 ms | 0 |
+| release | 968 | 417.06 ms | 3533.66 ms | 1 |
+| open | 691 | 0.01 ms | 0.04 ms | 0 |
+| unlink | 474 | 17.73 ms | 1134.06 ms | 0 |
+| create | 278 | 0.1 ms | 0.35 ms | 0 |
+| readdir | 135 | 190.15 ms | 20306.66 ms | 0 |
+| statfs | 60 | 3034.37 ms | 47847.95 ms | 0 |
+| rmdir | 19 | 25.63 ms | 35.86 ms | 0 |
+| mkdir | 16 | 560.62 ms | 4516.75 ms | 0 |
+| rename | 12 | 412.43 ms | 1766.66 ms | 0 |
 
 ### office
-Window 25s · 4 operations · read 0.0 MB/s · write 0.0 MB/s · 0 errors
+Window 30s · 4 operations · read 0.0 MB/s · write 0.0 MB/s · 0 errors
 
 | FUSE operation | Calls | Mean | Peak | Errors |
 |---|---|---|---|---|
-| statfs | 4 | 16.41 ms | 24.49 ms | 0 |
+| statfs | 4 | 51.04 ms | 54.83 ms | 0 |
 
 ## 5. Concurrent load
 | Node | Streams | Per file | Total | Elapsed | Aggregate | Landed |
 |---|---|---|---|---|---|---|
-| sonic | 8 | 8.0 MB | 64.0 MB | 0.24 s | 265.9 MB/s | 8/8 |
-| office | 8 | 8.0 MB | 64.0 MB | 0.42 s | 152.5 MB/s | 8/8 |
+| sonic | 8 | 8.0 MB | 64.0 MB | 0.31 s | 205.7 MB/s | 8/8 |
+| office | 8 | 8.0 MB | 64.0 MB | 0.43 s | 149.3 MB/s | 7/8 |
 
 ## 6. Real directory tree
 A genuine source tree copied in, read back, and compared with `diff -r` — every byte of every file, both directions. This is the shape most real data has: many small files, where per-file cost dominates and raw throughput barely matters.
 | Node | Files | Total | Mean file | Write | Write rate | Read | Read rate | Verified |
 |---|---|---|---|---|---|---|---|---|
-| **sonic** | 218 files | 1.2 MB | 5.5 KB | 9.45 s | 23.1/s | 28.47 s | 7.7/s | identical |
-| **office** | 218 files | 1.2 MB | 5.5 KB | 23.26 s | 9.4/s | 31.25 s | 7.0/s | **differs** |
+| **sonic** | 218 files | 1.2 MB | 5.5 KB | 24.06 s | 9.1/s | 15.6 s | 14.0/s | identical |
+| **office** | 218 files | 1.2 MB | 5.5 KB | 17.27 s | 12.6/s | 64.67 s | 3.4/s | identical |
 
 ## 7. Cross-node reconciliation
 Time from a write completing on one machine to the file being visible, then readable, on the other.
 | Direction | Samples | Visible median | Visible p95 | Readable median | Readable max | Failures |
 |---|---|---|---|---|---|---|
-| sonic → office | 5 | 280.7 ms | 291.6 ms | 573.6 ms | 619.4 ms | 0 |
-| office → sonic | 5 | 343.1 ms | 376.8 ms | 389.3 ms | 421.4 ms | 0 |
+| sonic → office | 5 | 415.0 ms | 435.6 ms | 754.4 ms | 788.7 ms | 0 |
+| office → sonic | 5 | 732.0 ms | 850.7 ms | 813.2 ms | 922.0 ms | 0 |
 
 ## 8. Shard distribution
 | Node | Files | Shards | Held here | On peers | Stored for peers | Missing | Own shards | Hosted for peers | Expansion |
 |---|---|---|---|---|---|---|---|---|---|
-| **sonic** | 42 | 504 | 256 | 122 | 167 | 126 | 93.3 MB | 329 MB | 6.63x |
-| **office** | 49 | 588 | 324 | 167 | 122 | 97 | 5.0 GB | 6.5 MB | 1.45x |
+| **sonic** | 43 | 516 | 256 | 124 | 1112 | 136 | 93.3 MB | 500 MB | 2.02x |
+| **office** | 288 | 3456 | 2209 | 1112 | 124 | 135 | 5.3 GB | 17.2 MB | 1.43x |
 
 > Expansion is our shards against our own data — the erasure-coding overhead. Data stored for peers occupies the quota but is counted separately, since it is not our storage cost.
 
@@ -136,22 +136,22 @@ Time from a write completing on one machine to the file being visible, then read
 | Shard placement | {"http://192.168.1.43:8010": 4, "local": 8} |
 | Peer holding remote shards | stopped |
 | Read succeeded | yes |
-| Read time | 3.60 s |
+| Read time | 4.56 s |
 | SHA-256 matched | yes |
 
 ## 9. Quota saturation
 The production pledge is 1 TB per node. Filling that to its cutoff would take hours and a terabyte of disk, and the behaviour under test — what the node does when it runs out of pledged room — is identical at any quota. So the quota was temporarily lowered, driven past the cutoff, and restored.
 | Measurement | Value |
 |---|---|
-| Temporary quota | 1.4 GB |
+| Temporary quota | 1.6 GB |
 | Write cutoff watermark | 50% |
-| Data written before cutoff | 384 MB |
-| Files written | 12 |
-| Elapsed | 7.65 s |
+| Data written before cutoff | 288 MB |
+| Files written | 9 |
+| Elapsed | 9.95 s |
 | Cutoff triggered | yes |
-| Usage at stop | 50.9% |
+| Usage at stop | 51.2% |
 | Accepting writes after cutoff | no |
-| Node response | `node stopped accepting writes at 51.1% of quota (cutoff 50%)` |
+| Node response | `node stopped accepting writes at 51.2% of quota (cutoff 50%)` |
 | Quota restored to | 1.0 TB |
 
 ## 10. Peer contracts and proof-of-storage
@@ -160,11 +160,11 @@ Contracts are how a node verifies a peer is really holding what it claims: it as
 ### Challenge round trip
 | Stage | Samples | Median | p95 | Max | Failures |
 |---|---|---|---|---|---|
-| Origin builds the challenge | 4 | 1.5 ms | 10.7 ms | 10.7 ms | 0 |
-| Peer computes the proof | 4 | 2.5 ms | 3.2 ms | 3.2 ms | 0 |
-| Origin verifies and scores | 4 | 1.4 ms | 1.9 ms | 1.9 ms | 0 |
+| Origin builds the challenge | 4 | 2.0 ms | 10.8 ms | 10.8 ms | 0 |
+| Peer computes the proof | 4 | 8.3 ms | 12.1 ms | 12.1 ms | 0 |
+| Origin verifies and scores | 4 | 2.4 ms | 2.8 ms | 2.8 ms | 0 |
 
-End-to-end proof of one shard: **5.3 ms** (sum of medians).
+End-to-end proof of one shard: **12.7 ms** (sum of medians).
 
 ### Outcome
 | Measurement | Value |
@@ -188,23 +188,24 @@ End-to-end proof of one shard: **5.3 ms** (sum of medians).
 The web console and the mount are two views of one namespace, so they must list exactly the same files.
 | Node | Console entries | Distinct paths | Paths in mount | Result |
 |---|---|---|---|---|
-| **sonic** | 91 | 90 | 90 | identical |
-| **office** | 91 | 90 | 90 | identical |
+| **sonic** | 331 | 330 | 330 | identical |
+| **office** | 331 | 330 | 330 | identical |
 
 > The console lists files by id, so two files can share a path. A POSIX filesystem cannot represent that, so the mount shows one of each. Colliding paths in this namespace: `bunny_1080p.mp4` ×2.
 
 ## 12. Observations
-- **sonic** peaks at 319.5 MB/s write (8MB) and 23.8 MB/s read (8MB).
-- On **sonic** a 64MB write moves data 1431× faster per byte than a 4KB one — small files are dominated by the fixed cost of encoding and the round trip, not by size.
-- **office** peaks at 179.8 MB/s write (64MB) and 24.2 MB/s read (8MB).
-- On **office** a 64MB write moves data 17983× faster per byte than a 4KB one — small files are dominated by the fixed cost of encoding and the round trip, not by size.
+- **sonic** peaks at 339.9 MB/s write (8MB) and 22.5 MB/s read (8MB).
+- On **sonic** a 64MB write moves data 2864× faster per byte than a 4KB one — small files are dominated by the fixed cost of encoding and the round trip, not by size.
+- **office** peaks at 171.1 MB/s write (64MB) and 21.2 MB/s read (8MB).
+- On **office** a 64MB write moves data 17109× faster per byte than a 4KB one — small files are dominated by the fixed cost of encoding and the round trip, not by size.
 - Every round trip was hash-checked: **30/30** files came back byte-identical after erasure coding, encryption, distribution across two machines and reconstruction.
-- A file written on **sonic** is readable on **office** in 573.6 ms (median).
-- A file written on **office** is readable on **sonic** in 389.3 ms (median).
-- A real 218-file tree (1.2 MB, mean file 5.5 KB) copied into **sonic** in 9.45s and read back in 28.47s, verified byte-for-byte with `diff -r`. At this file size the cost is per-file, not per-byte: 23.1 files/s written.
-- Proof-of-storage works end to end: **4/4** challenges verified, at 5.3 ms per shard — cheap enough to run continuously across a fleet.
-- With the peer holding a file's remote shards stopped, the file still reconstructed byte-identically in 3.60 s — the parity budget holds in practice, not just on paper.
-- The write cutoff works: the node refused new writes at 50.9% of its pledged quota and reported why, rather than filling the host disk.
+- A file written on **sonic** is readable on **office** in 754.4 ms (median).
+- A file written on **office** is readable on **sonic** in 813.2 ms (median).
+- A real 218-file tree (1.2 MB, mean file 5.5 KB) copied into **sonic** in 24.06s and read back in 15.6s, verified byte-for-byte with `diff -r`. At this file size the cost is per-file, not per-byte: 9.1 files/s written.
+- A real 218-file tree (1.2 MB, mean file 5.5 KB) copied into **office** in 17.27s and read back in 64.67s, verified byte-for-byte with `diff -r`. At this file size the cost is per-file, not per-byte: 12.6 files/s written.
+- Proof-of-storage works end to end: **4/4** challenges verified, at 12.7 ms per shard — cheap enough to run continuously across a fleet.
+- With the peer holding a file's remote shards stopped, the file still reconstructed byte-identically in 4.56 s — the parity budget holds in practice, not just on paper.
+- The write cutoff works: the node refused new writes at 51.2% of its pledged quota and reported why, rather than filling the host disk.
 - Console and mount list identical file sets on sonic, office — the UI is a view of the same namespace, not a separate index.
 
 ## 13. Reproducing
