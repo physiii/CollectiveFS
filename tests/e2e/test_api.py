@@ -48,12 +48,42 @@ async def client():
         yield c
 
 
+# A node holding more than this is not a scratch node, and wiping it is
+# certainly not what the person running the tests meant. A handful of leftovers
+# from a previous run is expected; fifty files is someone's cluster.
+SCRATCH_MAX_FILES = 5
+
+
+async def _guard_scratch_node(client: httpx.AsyncClient) -> None:
+    """Refuse to wipe a node that looks like it holds real data.
+
+    This suite deletes every file on its target before and after each test. If
+    it is pointed at a live node — an easy mistake, the URL is one env var —
+    that is unrecoverable data loss with no prompt and no undo. It has already
+    happened once. Counting first turns a silent wipe into a failed test.
+    """
+    resp = await client.get(f"{API_PREFIX}/files")
+    if resp.status_code != 200:
+        return
+    files = resp.json()
+    count = len(files if isinstance(files, list) else files.get("files", []))
+    if count > SCRATCH_MAX_FILES and not os.environ.get("CFS_ALLOW_DESTRUCTIVE"):
+        pytest.exit(
+            f"Refusing to run: {BASE_URL} holds {count} files, so it is not a "
+            f"scratch node. This suite deletes every file on its target. Point "
+            f"CFS_API_URL at a scratch node (see docs/TESTING.md), or set "
+            f"CFS_ALLOW_DESTRUCTIVE=1 if you genuinely mean to wipe it.",
+            returncode=2,
+        )
+
+
 @pytest_asyncio.fixture(autouse=True)
 async def cleanup_files(client: httpx.AsyncClient):
     """
     Delete all files from the API before *and* after every test so each test
     starts from a clean state regardless of execution order.
     """
+    await _guard_scratch_node(client)
     await _delete_all_files(client)
     yield
     await _delete_all_files(client)
