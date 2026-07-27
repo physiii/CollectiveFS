@@ -804,6 +804,7 @@ async def upload_file(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     folder: str = Form(""),
+    symlink: str = Form(""),
 ) -> UploadResponse:
     token = _token(request)
     file_id = str(uuid.uuid4())
@@ -876,6 +877,11 @@ async def upload_file(
             "status": "processing",
             "folder": folder or None,
             "token": token,
+            # A symlink is stored as an ordinary (tiny) file whose body is the
+            # target, plus this field. Keeping the target in metadata means
+            # readlink() answers from the tree without reconstructing shards —
+            # and `cp -r` of a real source tree issues one per symlink.
+            "symlink": symlink or None,
             "chunk_list": [],
         },
     )
@@ -1020,7 +1026,12 @@ async def download_file(file_id: str, request: Request) -> StreamingResponse:
                     # data becomes hundreds of thousands of ~256-byte sends,
                     # each with a threadpool hop. That alone made a 64 MB read
                     # take 34s instead of 1.6s. FileResponse sends fixed blocks
-                    # and adds Content-Length and range support.
+                    # and adds Content-Length.
+                    #
+                    # It does NOT add range support at the pinned Starlette
+                    # (0.35.1); FileResponse gained Range/206 handling only in
+                    # 0.39.0. Ranged reads therefore need either that upgrade or
+                    # a hand-rolled 206 — see docs/PERFORMANCE.md, Phase 4.
                     return FileResponse(
                         str(out_file),
                         media_type="application/octet-stream",

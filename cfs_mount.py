@@ -160,11 +160,12 @@ class NodeClient:
         response.raise_for_status()
         return response.content
 
-    def upload(self, name: str, folder: str, payload: bytes) -> Dict[str, Any]:
+    def upload(self, name: str, folder: str, payload: bytes,
+               symlink: str = "") -> Dict[str, Any]:
         response = self._client.post(
             "/api/files/upload",
             files={"file": (name, payload, "application/octet-stream")},
-            data={"folder": folder},
+            data={"folder": folder, "symlink": symlink},
         )
         response.raise_for_status()
         return response.json()
@@ -204,16 +205,18 @@ class NodeClient:
 
 
 class Node:
-    __slots__ = ("inode", "path", "is_dir", "file_id", "size", "mtime")
+    __slots__ = ("inode", "path", "is_dir", "file_id", "size", "mtime", "symlink")
 
     def __init__(self, inode: int, path: str, is_dir: bool, file_id: str = "",
-                 size: int = 0, mtime: float = 0.0):
+                 size: int = 0, mtime: float = 0.0, symlink: str = ""):
         self.inode = inode
         self.path = path
         self.is_dir = is_dir
         self.file_id = file_id
         self.size = size
         self.mtime = mtime or time.time()
+        # Target of a symbolic link, empty for everything else.
+        self.symlink = symlink
 
 
 class CollectiveFS(pyfuse3.Operations):
@@ -259,7 +262,7 @@ class CollectiveFS(pyfuse3.Operations):
     # ── tree state ──────────────────────────────────────────────────
 
     def _intern(self, path: str, is_dir: bool, file_id: str = "", size: int = 0,
-                mtime: float = 0.0) -> Node:
+                mtime: float = 0.0, symlink: str = "") -> Node:
         """Path -> Node, keeping inode numbers stable across refreshes.
 
         Stability matters: the kernel caches inode numbers, so reusing a number
@@ -267,7 +270,7 @@ class CollectiveFS(pyfuse3.Operations):
         """
         node = self._by_path.get(path)
         if node is None:
-            node = Node(self._next_inode, path, is_dir, file_id, size, mtime)
+            node = Node(self._next_inode, path, is_dir, file_id, size, mtime, symlink)
             self._next_inode += 1
             self._by_path[path] = node
             self._by_inode[node.inode] = node
@@ -279,6 +282,7 @@ class CollectiveFS(pyfuse3.Operations):
                 node.size = size
             if mtime:
                 node.mtime = mtime
+            node.symlink = symlink
         return node
 
     def _forget_path(self, path: str) -> None:
@@ -313,7 +317,8 @@ class CollectiveFS(pyfuse3.Operations):
                 path = f"{folder}/{entry['name']}" if folder else entry["name"]
                 live.add(path)
                 mtime = _parse_time(entry.get("created_at"))
-                self._intern(path, False, entry.get("id", ""), int(entry.get("size") or 0), mtime)
+                self._intern(path, False, entry.get("id", ""), int(entry.get("size") or 0),
+                             mtime, entry.get("symlink") or "")
                 # Once the node has encoded it, the local copy is redundant.
                 if entry.get("status") in ("stored", "complete"):
                     self._release_pending(entry.get("id", ""))
@@ -359,6 +364,12 @@ class CollectiveFS(pyfuse3.Operations):
             attr.st_mode = stat.S_IFDIR | 0o755
             attr.st_size = 0
             attr.st_nlink = 2
+        elif node.symlink:
+            # A link's size is the length of its target, and its mode must be
+            # 0o777 — the kernel resolves through it and ignores the bits.
+            attr.st_mode = stat.S_IFLNK | 0o777
+            attr.st_size = len(node.symlink.encode("utf-8"))
+            attr.st_nlink = 1
         else:
             attr.st_mode = stat.S_IFREG | 0o644
             writer = self._writers.get(node.inode)
@@ -688,6 +699,42 @@ class CollectiveFS(pyfuse3.Operations):
         node = self._intern(path, True)
         self._tree_fetched = 0.0
         return self._attrs(node)
+
+    @timed("symlink")
+    async def symlink(self, parent_inode: int, name: bytes, target: bytes, ctx=None):
+        """Create a symbolic link.
+
+        Without this, `cp -r` of any real source tree fails partway with
+        ENOSYS — Debian doc trees, node_modules and source checkouts are all
+        full of links. The link is stored as an ordinary tiny file whose body
+        is the target, tagged with `symlink` in its metadata, so it erasure
+        codes, replicates and repairs like anything else.
+        """
+        parent = self._node(parent_inode)
+        label = name.decode("utf-8", "surrogateescape")
+        path = f"{parent.path}/{label}" if parent.path else label
+        if path in self._by_path:
+            raise pyfuse3.FUSEError(errno.EEXIST)
+        destination = target.decode("utf-8", "surrogateescape")
+        try:
+            result = await self._in_thread(
+                self.client.upload, label, parent.path,
+                destination.encode("utf-8"), destination,
+            )
+        except httpx.HTTPError as exc:
+            log.error("symlink %s -> %s failed: %s", path, destination, exc)
+            raise pyfuse3.FUSEError(errno.EIO)
+        node = self._intern(path, False, result.get("id", ""),
+                            len(destination.encode("utf-8")), 0.0, destination)
+        self._tree_fetched = 0.0
+        return self._attrs(node)
+
+    @timed("readlink")
+    async def readlink(self, inode: int, ctx=None) -> bytes:
+        node = self._node(inode)
+        if not node.symlink:
+            raise pyfuse3.FUSEError(errno.EINVAL)
+        return node.symlink.encode("utf-8", "surrogateescape")
 
     @timed("rmdir")
     async def rmdir(self, parent_inode: int, name: bytes, ctx=None) -> None:

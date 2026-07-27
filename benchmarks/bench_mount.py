@@ -309,40 +309,57 @@ def bench_reconciliation(writer: Host, reader: Host, iterations: int, prefix: st
     """How long until a file written on one machine is readable on the other."""
     visible = Timing("visible to peer")
     readable = Timing("readable on peer")
+    problems: List[str] = []
 
     for index in range(iterations):
         name = f"{prefix}-recon-{index}.txt"
         marker = f"recon-{index}-{int(time.time() * 1000)}"
-        writer.run(f"echo {marker} > {writer.mount}/{name}", timeout=120)
+        wrote = writer.run(f"echo {marker} > {writer.mount}/{name}", timeout=120)
+        # A failed write would otherwise be recorded as a propagation failure —
+        # the peer never sees a file that was never created, and the reason is
+        # lost. Attribute it here instead.
+        if wrote.returncode != 0:
+            visible.failures += 1
+            problems.append(f"{name}: write failed on {writer.name}: "
+                            f"{(wrote.stderr or '').strip()[:120]}")
+            continue
 
         start = time.perf_counter()
         seen_at = None
         read_at = None
         deadline = start + 30
+        # Bound each probe so one slow stat cannot eat the whole budget. A
+        # single 30s-timeout probe would exit the loop after one attempt and
+        # report a propagation failure that never happened.
         while time.perf_counter() < deadline:
-            probe = reader.run(f"test -f {reader.mount}/{name} && echo yes", timeout=60)
+            probe = reader.run(f"test -f {reader.mount}/{name} && echo yes", timeout=5)
             if probe.stdout.strip() == "yes":
                 seen_at = (time.perf_counter() - start) * 1000
                 break
         if seen_at is None:
             visible.failures += 1
+            problems.append(f"{name}: not visible on {reader.name} within 30s")
             continue
         visible.samples_ms.append(seen_at)
 
         deadline = time.perf_counter() + 30
         while time.perf_counter() < deadline:
-            probe = reader.run(f"cat {reader.mount}/{name} 2>/dev/null", timeout=60)
+            probe = reader.run(f"cat {reader.mount}/{name} 2>/dev/null", timeout=10)
             if marker in probe.stdout:
                 read_at = (time.perf_counter() - start) * 1000
                 break
         if read_at is None:
             readable.failures += 1
+            problems.append(f"{name}: visible but not readable on {reader.name} within 30s")
         else:
             readable.samples_ms.append(read_at)
 
         writer.run(f"rm -f {writer.mount}/{name}", timeout=60)
 
-    return {"visible": visible.summary(), "readable": readable.summary()}
+    out = {"visible": visible.summary(), "readable": readable.summary()}
+    if problems:
+        out["problems"] = problems
+    return out
 
 
 def bench_parallel_load(host: Host, streams: int, size: int, prefix: str) -> Dict[str, Any]:

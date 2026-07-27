@@ -307,6 +307,12 @@ def build_report(data: Dict[str, Any]) -> str:
         ["Direction", "Samples", "Visible median", "Visible p95",
          "Readable median", "Readable max", "Failures"], rows))
 
+    # A failure count with no reason is not actionable — and the reason
+    # distinguishes "the write never happened" from "propagation is broken".
+    for entry in data.get("reconciliation", []):
+        for problem in entry.get("problems", []):
+            parts.append(f"> {entry['from']} → {entry['to']}: {problem}\n")
+
     # ── distribution ────────────────────────────────────────────────
     parts.append("\n## 8. Shard distribution\n")
     rows = []

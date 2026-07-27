@@ -162,6 +162,9 @@ def _file_entry(item: Dict[str, Any], status_overlay: Dict[str, Any]) -> Dict[st
         "created_at": item.get("created_at", ""),
         "status": status,
         "progress": (overlay or {}).get("progress"),
+        # Present only for symlinks; the mount reads the target from here
+        # rather than downloading the file body.
+        "symlink": item.get("symlink") or None,
     }
 
 
