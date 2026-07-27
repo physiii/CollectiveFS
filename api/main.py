@@ -1829,11 +1829,50 @@ async def repair_run(request: Request, body: Dict[str, Any] = None) -> Dict[str,
                 shutil.rmtree(str(shard_dir), ignore_errors=True)
             purged_dead.append(entry)
 
+    # Shards we hold for a peer are filed under that peer's node id. When a peer
+    # is rebuilt it comes back with a *new* id, and everything filed under the
+    # old one becomes unclaimable: its origin will never ask for it and never
+    # delete it, but it still occupies the quota. We saw 1.2 GB accumulate this
+    # way from a single OS reinstall.
+    #
+    # The check has to be conservative in the same way redundancy scanning is:
+    # a peer that is merely down must never look dead. So the sweep runs only
+    # when every configured peer answered, and it keeps any id that any live
+    # peer claims.
+    reclaimed: Dict[str, Any] = {}
+    if body.get("purge_dead_origins"):
+        live_ids = {NODE_ID}
+        unreachable = []
+        for peer_url in list(_peers):
+            try:
+                async with httpx.AsyncClient(timeout=10.0) as client:
+                    response = await client.get(f"{peer_url}/api/system/overview")
+                node_id = response.json().get("node_id") if response.status_code < 400 else None
+            except (httpx.HTTPError, ValueError):
+                node_id = None
+            if not node_id:
+                unreachable.append(peer_url)
+            else:
+                live_ids.add(node_id)
+
+        if unreachable:
+            reclaimed = {"skipped": "peers unreachable", "peers": unreachable}
+        elif PEER_SHARD_DIR.exists():
+            dead, freed = [], 0
+            for origin in PEER_SHARD_DIR.iterdir():
+                if not origin.is_dir() or origin.name in live_ids:
+                    continue
+                freed += sum(f.stat().st_size for f in origin.rglob("*") if f.is_file())
+                dead.append(origin.name)
+                shutil.rmtree(str(origin), ignore_errors=True)
+            reclaimed = {"origins": dead, "bytes": freed}
+
     return {
         "before": summary,
         "rebuilt": rebuilt,
         "purged_orphans": purged,
         "purged_unrecoverable": purged_dead,
+        "reclaimed_dead_origins": reclaimed,
         "after": repair.summarise(await _scan_health(token)),
     }
 
