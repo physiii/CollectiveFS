@@ -1797,10 +1797,43 @@ async def repair_run(request: Request, body: Dict[str, Any] = None) -> Dict[str,
             except OSError:
                 continue
 
+    # Retiring an unrecoverable file is a separate, louder decision than
+    # retiring an orphan. An orphan has no bytes left to lose; an unrecoverable
+    # file still holds shards — just fewer than data_shards, so no arrangement
+    # of them reconstructs it. Purging reclaims that space and stops the
+    # namespace advertising a file nothing can read, but it is irreversible,
+    # so it never rides along with purge_orphans.
+    purged_dead = []
+    if body.get("purge_unrecoverable"):
+        for entry in summary["unrecoverable"]:
+            file_id = entry["id"]
+            data = _read_tree_json(file_id)
+            try:
+                (TREE_DIR / f"{file_id}.json").unlink(missing_ok=True)
+            except OSError:
+                continue
+            for peer_url in {
+                chunk.get("peer")
+                for chunk in (data or {}).get("chunk_list", [])
+                if chunk.get("peer")
+            }:
+                try:
+                    async with httpx.AsyncClient(timeout=10.0) as client:
+                        await client.delete(
+                            f"{peer_url}/api/peers/shards/{NODE_ID}/{file_id}"
+                        )
+                except httpx.HTTPError:
+                    pass
+            shard_dir = PROC_DIR / file_id
+            if shard_dir.exists():
+                shutil.rmtree(str(shard_dir), ignore_errors=True)
+            purged_dead.append(entry)
+
     return {
         "before": summary,
         "rebuilt": rebuilt,
         "purged_orphans": purged,
+        "purged_unrecoverable": purged_dead,
         "after": repair.summarise(await _scan_health(token)),
     }
 
