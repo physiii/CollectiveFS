@@ -271,19 +271,21 @@ def build_report(data: Dict[str, Any]) -> str:
             f"{entry.get('write_files_per_s')}/s",
             f"{entry['read_s']} s",
             f"{entry.get('read_files_per_s')}/s",
+            f"{entry.get('symlinks', 0)}/{entry.get('source_symlinks', 0)}",
             "identical" if entry.get("identical") else "**differs**",
         ])
     if real_rows:
         parts.append("\n## 6. Real directory tree\n")
         parts.append(
             "A genuine source tree copied in, read back, and compared with "
-            "`diff -r` — every byte of every file, both directions. This is the "
-            "shape most real data has: many small files, where per-file cost "
+            "`diff -r --no-dereference` — every byte of every file, both "
+            "directions, with symlinks compared as symlinks. This is the shape "
+            "most real data has: many small files, where per-file cost "
             "dominates and raw throughput barely matters.\n"
         )
         parts.append(table(
             ["Node", "Files", "Total", "Mean file", "Write", "Write rate",
-             "Read", "Read rate", "Verified"], real_rows))
+             "Read", "Read rate", "Symlinks", "Verified"], real_rows))
 
     # ── reconciliation ──────────────────────────────────────────────
     parts.append("\n## 7. Cross-node reconciliation\n")

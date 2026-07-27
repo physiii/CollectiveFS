@@ -781,7 +781,17 @@ def bench_real_tree(host: Host, source: str, prefix: str) -> Dict[str, Any]:
     read_s = time.perf_counter() - start
 
     # diff is the honest check: every byte of every file, both directions.
-    verify = host.run(f"diff -r {source} {target} > /dev/null 2>&1", timeout=1800)
+    #
+    # --no-dereference compares symlinks as symlinks. Without it diff *follows*
+    # them, and a relative link like `../../../git-core/contrib/hooks` resolves
+    # outside the copied tree and reports "No such file or directory" — which
+    # says nothing about the filesystem under test. Verified: copying the same
+    # tree onto plain ext4 fails the dereferencing check identically.
+    verify = host.run(
+        f"diff -r --no-dereference {source} {target} > /dev/null 2>&1", timeout=1800
+    )
+    links = host.run(f"find {target} -type l 2>/dev/null | wc -l", timeout=600).stdout.strip()
+    source_links = host.run(f"find {source} -type l 2>/dev/null | wc -l", timeout=600).stdout.strip()
 
     host.run(f"rm -rf {target}", timeout=1800)
     return {
@@ -800,4 +810,6 @@ def bench_real_tree(host: Host, source: str, prefix: str) -> Dict[str, Any]:
         "copy_ok": copy_in.returncode == 0,
         "read_ok": read_back.returncode == 0,
         "identical": verify.returncode == 0,
+        "symlinks": int(links) if links.isdigit() else 0,
+        "source_symlinks": int(source_links) if source_links.isdigit() else 0,
     }

@@ -93,8 +93,12 @@ test.describe('console shell', () => {
     await page.goto('/')
     await expect(page.locator('.topbar-brand')).toHaveText('CollectiveFS')
 
-    const titles = await page.locator('.section-card-title').allTextContents()
-    expect(titles).toEqual(['Files', 'System & Infrastructure'])
+    // toHaveText on the locator, not allTextContents(): the latter is a
+    // one-shot read with no auto-waiting, and the section cards only render
+    // after the first telemetry fetch resolves. On a cold server that lands
+    // after the brand does, so the snapshot caught an empty list.
+    await expect(page.locator('.section-card-title'))
+      .toHaveText(['Files', 'System & Infrastructure'])
   })
 
   test('each section offers dashboard, chat and skill views', async ({ page }) => {
@@ -246,6 +250,9 @@ test.describe('files explorer', () => {
 test.describe('system & infrastructure', () => {
   test('renders every telemetry panel', async ({ page }) => {
     await openSection(page, 'system')
+    // Settle the panel list before snapshotting it — same one-shot-read hazard
+    // as the section titles above.
+    await expect(page.locator('.skill-panel-block h3').first()).toBeVisible()
     const panels = await page.locator('.skill-panel-block h3').allTextContents()
     for (const expected of ['Storage & Quota', 'Compute', 'Memory', 'Network', 'Durability', 'Peers & Contracts']) {
       expect(panels).toContain(expected)

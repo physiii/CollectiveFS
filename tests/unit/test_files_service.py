@@ -206,3 +206,27 @@ def test_same_name_in_a_different_folder_is_fine():
 def test_move_rejects_bad_names(name):
     with pytest.raises(FileTreeError):
         validate_move(name, None, [make_file("1", "a.txt")], "1")
+
+
+# ── symbolic links ──────────────────────────────────────────────────
+
+
+def test_symlink_target_is_carried_into_the_tree():
+    """The mount answers readlink() from the tree, never by downloading."""
+    item = make_file("1", "link.txt")
+    item["symlink"] = "../target.txt"
+    tree = build_tree([item], [])
+    assert tree["files"][0]["symlink"] == "../target.txt"
+
+
+def test_ordinary_file_reports_no_symlink_target():
+    tree = build_tree([make_file("1", "plain.txt")], [])
+    assert tree["files"][0]["symlink"] is None
+
+
+def test_empty_symlink_field_is_normalised_to_none():
+    """An empty form field must not make a regular file look like a link."""
+    item = make_file("1", "plain.txt")
+    item["symlink"] = ""
+    tree = build_tree([item], [])
+    assert tree["files"][0]["symlink"] is None

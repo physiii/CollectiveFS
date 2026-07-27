@@ -21,9 +21,14 @@ import httpx
 # Configuration
 # ---------------------------------------------------------------------------
 
-# Overridable so the suite can run against a scratch node instead of whatever
-# happens to hold port 8000.
-BASE_URL = os.environ.get("CFS_API_URL", "http://localhost:8000")
+# These tests MUTATE config (they PUT contracts.max_peers, drive the quota, and
+# upload and delete files), so the default must never be a real node. 8021 is a
+# scratch port — the same one Playwright's throwaway server uses — not 8000
+# (commonly held by something else, whose 404s read as "every endpoint is
+# missing") and emphatically not 8010, which docker-compose publishes for the
+# live node. Point CFS_API_URL at a scratch node started with its own
+# COLLECTIVE_PATH; see docs/TESTING.md.
+BASE_URL = os.environ.get("CFS_API_URL", "http://localhost:8021")
 API_PREFIX = "/api"
 
 

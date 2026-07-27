@@ -61,7 +61,7 @@ make test-unit && make test-eval && python benchmarks/run_all.py
 **Full e2e with Docker (~2.5 min):**
 ```bash
 docker compose -f docker-compose.yml up -d
-curl -sf http://localhost:8000/api/health
+curl -sf http://localhost:8021/api/health
 source .venv/bin/activate
 pytest tests/e2e/test_api.py -v
 npx playwright test --project=chromium
@@ -167,7 +167,7 @@ tests poll for completion before asserting.
 
 ```bash
 # In one terminal, start the server:
-python -m uvicorn api.main:app --port 8000
+COLLECTIVE_PATH=.pw-collective python -m uvicorn api.main:app --port 8021
 
 # In another terminal, run the tests:
 python -m pytest tests/e2e/test_api.py -v -m api
@@ -358,7 +358,7 @@ This catches padding bugs, shard naming mismatches, and decoder path issues.
 | `eval` | Evaluation/benchmark tests |
 | `fuse` | Tests requiring FUSE mount capability |
 | `slow` | Tests that take > 5 seconds |
-| `api` | API tests requiring a running server on port 8000 |
+| `api` | API tests requiring a **scratch** server on port 8021 (override with `CFS_API_URL`) — they mutate config and files, so never point them at a live node |
 | `cluster` | Multi-node Docker cluster tests |
 
 Filter by marker:
