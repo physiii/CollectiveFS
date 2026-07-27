@@ -45,7 +45,7 @@ from api.models import (
     UploadResponse,
 )
 from api.contracts import ContractManager, TIER_CONFIGS, respond_to_challenge
-from api import accounts, agent_service, files_service, fs_metrics, replication, system_service
+from api import accounts, agent_service, files_service, fs_metrics, repair, replication, system_service
 from api.config_service import ConfigError, ConfigStore, apply_updates, describe_settings
 from api.files_service import FileTreeError, FolderStore
 
@@ -913,8 +913,18 @@ async def delete_file(file_id: str, request: Request) -> Dict[str, bool]:
                 return {"deleted": True}
         raise HTTPException(status_code=404, detail="File not found")
 
-    # Ask every peer holding a shard of this file to drop it, before the
-    # metadata that records where they are goes away.
+    # Retire the metadata first. A delete is several steps against several
+    # machines and any of them can fail; the ordering decides what a partial
+    # delete leaves behind. Removing metadata first leaves orphaned *shards* —
+    # unreferenced bytes that a sweep can reclaim. The other order leaves
+    # orphaned *metadata*: a file that still lists in the namespace and can
+    # never be read. We saw exactly that when a mount died mid-delete.
+    tree_path = TREE_DIR / f"{file_id}.json"
+    try:
+        tree_path.unlink(missing_ok=True)
+    except OSError:
+        pass
+
     peer_urls = {
         chunk.get("peer")
         for chunk in data.get("chunk_list", [])
@@ -933,13 +943,6 @@ async def delete_file(file_id: str, request: Request) -> Dict[str, bool]:
     shard_dir = PROC_DIR / file_id
     if shard_dir.exists():
         shutil.rmtree(str(shard_dir), ignore_errors=True)
-
-    # Remove tree JSON
-    tree_path = TREE_DIR / f"{file_id}.json"
-    try:
-        tree_path.unlink(missing_ok=True)
-    except Exception:
-        pass
 
     # Clean up status
     _file_statuses.pop(file_id, None)
@@ -1324,6 +1327,25 @@ async def list_replicas() -> Dict[str, Any]:
     return {"nodes": nodes, "shards": total_shards, "bytes": total_bytes}
 
 
+@app.get("/api/peers/shards/{origin_node}/{file_id}")
+async def list_replica_indices(origin_node: str, file_id: str) -> Dict[str, Any]:
+    """Which shard indices this node holds for a peer's file.
+
+    Repair needs to know what a peer *actually* has, not what our metadata says
+    it was given — those diverge precisely when it matters.
+    """
+    directory = _replica_dir(origin_node, file_id)
+    indices: List[int] = []
+    if directory.is_dir():
+        for entry in directory.iterdir():
+            if not entry.is_file():
+                continue
+            suffix = entry.name.rsplit(".", 1)[-1]
+            if suffix.isdigit():
+                indices.append(int(suffix))
+    return {"origin_node": origin_node, "file_id": file_id, "indices": sorted(indices)}
+
+
 @app.get("/api/peers/shards/{origin_node}/{file_id}/{index}")
 async def serve_replica(origin_node: str, file_id: str, index: int):
     """Hand a stored shard back to the node that owns it."""
@@ -1662,6 +1684,114 @@ async def report_fs_metrics(body: Dict[str, Any]) -> Dict[str, Any]:
 @app.get("/api/fs/metrics")
 async def get_fs_metrics(window: float = Query(300.0, ge=10.0, le=3600.0)) -> Dict[str, Any]:
     return fs_stats.snapshot(window)
+
+
+# ---------------------------------------------------------------------------
+# Redundancy repair
+# ---------------------------------------------------------------------------
+
+
+async def _scan_health(token: str) -> List[Dict[str, Any]]:
+    reports = []
+    for metadata in _files_for(token):
+        reports.append(
+            await repair.assess(
+                metadata, NODE_ID, default_data_shards=ENCODER_DATA_SHARDS
+            )
+        )
+    return reports
+
+
+@app.get("/api/repair")
+async def repair_scan(request: Request) -> Dict[str, Any]:
+    """What is intact, degraded, unrecoverable or orphaned — without changing anything."""
+    reports = await _scan_health(_token(request))
+    return {"summary": repair.summarise(reports), "files": reports}
+
+
+async def _rebuild_file(file_id: str) -> Dict[str, Any]:
+    """Reconstruct a file from what survives, then re-encode and redistribute.
+
+    Re-encoding regenerates every shard, which is the simplest correct repair:
+    it restores the full parity budget rather than patching individual shards.
+    """
+    metadata = _read_tree_json(file_id)
+    if metadata is None:
+        return {"id": file_id, "repaired": False, "error": "no metadata"}
+
+    staging, shard_base, problems = await replication.gather_shards(
+        metadata=metadata, origin_node=NODE_ID, file_id=file_id, fernet=_load_fernet()
+    )
+    try:
+        if not shard_base:
+            return {"id": file_id, "repaired": False, "error": "no shards to rebuild from"}
+        data_shards = int(metadata.get("data_shards") or ENCODER_DATA_SHARDS)
+        parity_shards = int(metadata.get("parity_shards") or ENCODER_PAR_SHARDS)
+        rebuilt = CACHE_DIR / f"repair-{file_id}"
+        rebuilt.parent.mkdir(parents=True, exist_ok=True)
+        result = subprocess.run(
+            [str(DECODER_PATH), "-data", str(data_shards), "-par", str(parity_shards),
+             "-out", str(rebuilt), shard_base],
+            cwd=str(staging), capture_output=True, timeout=900,
+        )
+        if result.returncode != 0 or not rebuilt.exists():
+            return {"id": file_id, "repaired": False,
+                    "error": f"could not reconstruct: {'; '.join(problems[:3])}"}
+    finally:
+        replication.cleanup(staging)
+
+    try:
+        shard_dir = PROC_DIR / file_id
+        if shard_dir.exists():
+            shutil.rmtree(str(shard_dir), ignore_errors=True)
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(
+            None, _run_encode_pipeline, file_id, str(rebuilt),
+            metadata.get("name", "file"), metadata.get("folder") or "",
+            metadata.get("token", ""),
+        )
+        await _distribute_shards(file_id)
+    finally:
+        try:
+            rebuilt.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+    after = await repair.assess(
+        _read_tree_json(file_id) or {}, NODE_ID, default_data_shards=ENCODER_DATA_SHARDS
+    )
+    return {"id": file_id, "repaired": after["status"] == repair.Health.INTACT, "after": after}
+
+
+@app.post("/api/repair")
+async def repair_run(request: Request, body: Dict[str, Any] = None) -> Dict[str, Any]:
+    """Rebuild degraded files, and optionally retire metadata with no shards left."""
+    body = body or {}
+    token = _token(request)
+    reports = await _scan_health(token)
+    summary = repair.summarise(reports)
+
+    rebuilt = []
+    for file_id in summary["repairable"]:
+        rebuilt.append(await _rebuild_file(file_id))
+
+    purged = []
+    if body.get("purge_orphans"):
+        # Metadata with no shards anywhere describes a file that cannot be read
+        # by anyone; keeping it only makes the namespace lie.
+        for entry in summary["orphaned"]:
+            try:
+                (TREE_DIR / f"{entry['id']}.json").unlink(missing_ok=True)
+                purged.append(entry)
+            except OSError:
+                continue
+
+    return {
+        "before": summary,
+        "rebuilt": rebuilt,
+        "purged_orphans": purged,
+        "after": repair.summarise(await _scan_health(token)),
+    }
 
 
 # ---------------------------------------------------------------------------
