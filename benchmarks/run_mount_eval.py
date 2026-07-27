@@ -423,7 +423,17 @@ def build_report(data: Dict[str, Any]) -> str:
                 ["Challenges attempted", str(contracts.get("challenges_attempted", 0))],
                 ["Challenges passed", str(contracts.get("challenges_passed", 0))],
                 ["QoS score", str(qos.get("score", "—"))],
-                ["Challenge pass rate", str(qos.get("challenge_pass_rate", "—"))],
+                # Pass rate is derived, not reported: the peer sends counts.
+                ["Challenge pass rate", (
+                    f"{100.0 * qos['challenges_passed'] / qos['challenges_issued']:.1f}%"
+                    f" ({qos['challenges_passed']}/{qos['challenges_issued']})"
+                    if qos.get("challenges_issued") else "—"
+                )],
+                ["Mean proof response", ms(qos["avg_response_ms"])
+                 if qos.get("avg_response_ms") is not None else "—"],
+                ["p99 proof response", ms(qos["p99_response_ms"])
+                 if qos.get("p99_response_ms") is not None else "—"],
+                ["Challenges timed out", str(qos.get("challenges_timeout", 0))],
             ],
         ))
 
@@ -434,9 +444,9 @@ def build_report(data: Dict[str, Any]) -> str:
                 ["Tier", "Challenge interval", "Response deadline", "Storage multiplier", "Max violations"],
                 [
                     [
-                        str(tier.get("tier")),
-                        f"{tier.get('challenge_interval_seconds')} s",
-                        f"{tier.get('response_deadline_seconds')} s",
+                        str(tier.get("name")),
+                        f"{tier.get('challenge_interval_s')} s",
+                        f"{tier.get('max_response_s')} s",
                         f"{tier.get('storage_multiplier')}x",
                         str(tier.get("max_violations")),
                     ]
