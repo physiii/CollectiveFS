@@ -41,12 +41,16 @@ test-ui: build-ui
 
 # Full performance and evaluation report across the mounted cluster.
 # Override NODES to point at a different fleet.
+# A real directory present on every node. Version-specific paths (e.g.
+# /usr/include/python3.12) vanish when a host upgrades, silently leaving
+# that phase with nothing to measure.
+REAL_TREE ?= /usr/share/doc/git
 NODES ?= --node sonic=http://localhost:8010 --node office=http://192.168.1.43:8010@office
 eval-mount:
 	.venv/bin/python -m benchmarks.run_mount_eval $(NODES) \
 	  --iterations 3 --op-iterations 12 --recon-iterations 5 \
 	  --max-size 64MB --streams 8 --stream-size 8MB \
-	  --real-tree /usr/include/python3.12 \
+	  --real-tree $(REAL_TREE) \
 	  --degraded --contracts --saturate \
 	  --report benchmarks/results/mount-eval.md \
 	  --json benchmarks/results/mount-eval.json
