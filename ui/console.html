@@ -235,6 +235,21 @@
   .chartwrap .yax{position:absolute;top:0;left:0;bottom:0;display:flex;flex-direction:column;justify-content:space-between;pointer-events:none;color:var(--muted2);font-size:11px;font-variant-numeric:tabular-nums}
   .chartempty{position:absolute;inset:0;display:grid;place-items:center;color:var(--muted2);font-size:13px}
   .chartfoot{display:flex;gap:20px;margin-top:12px;color:var(--muted);font-size:12px;font-variant-numeric:tabular-nums}
+  /* in-app file viewer / player */
+  .viewer .vwrap{width:min(1100px,94vw);height:min(88vh,920px);display:flex;flex-direction:column;background:var(--menu);border:1px solid var(--line);border-radius:16px;overflow:hidden;box-shadow:0 30px 90px rgba(0,0,0,.6)}
+  .viewer .vbar{display:flex;align-items:center;gap:12px;padding:11px 14px;border-bottom:1px solid var(--line);flex:0 0 auto}
+  .viewer .vbar b{font-size:13px;font-weight:650;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .viewer .vspacer{flex:1}
+  .viewer .vbar .btn{padding:7px 12px}
+  .viewer .vclose{width:30px;height:30px;border-radius:9px;display:grid;place-items:center;color:var(--muted)}
+  .viewer .vclose:hover{background:rgba(255,255,255,.1);color:var(--fg)}
+  .viewer .vclose svg{width:13px;height:13px}
+  .viewer .vbody{flex:1;min-height:0;display:flex;align-items:center;justify-content:center;background:#0a0c11;position:relative}
+  .viewmedia{max-width:100%;max-height:100%;display:block;object-fit:contain}
+  .viewframe{width:100%;height:100%;border:0;background:#fff}
+  .viewtext{margin:0;width:100%;height:100%;overflow:auto;padding:18px 20px;font:12.5px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--fg);white-space:pre-wrap;word-break:break-word;background:#0d1017;text-align:left}
+  .viewpad{padding:40px}
+  .viewaudio{width:60vw;max-width:520px}
   /* ---- settings gear + panel ---- */
   .gear{width:28px;height:28px;border-radius:9px;display:grid;place-items:center;color:var(--muted);transition:.14s}
   .gear:hover{background:rgba(255,255,255,.09);color:var(--fg)}
@@ -330,9 +345,9 @@
   <div class="body">
     <!-- sidebar -->
     <div class="side" data-tauri-drag-region>
-      <div class="sidescroll">
+      <div class="sidescroll" data-tauri-drag-region>
         <h4 data-tauri-drag-region>Places</h4>
-        <div id="places"></div>
+        <div id="places" data-tauri-drag-region></div>
       </div>
       <div class="sidefoot" data-tauri-drag-region>
         <div class="rate"><span class="up" id="up">↑ 0 B/s</span><span class="down" id="down">↓ 0 B/s</span></div>
@@ -344,7 +359,7 @@
       <!-- FILES -->
       <div id="view-files" style="display:flex;flex-direction:column;min-height:0;flex:1">
         <div class="crumbs" id="crumbs" hidden></div>
-        <div class="page" id="filespage"></div>
+        <div class="page" id="filespage" data-tauri-drag-region></div>
       </div>
 
       <!-- PERFORMANCE -->
@@ -497,6 +512,35 @@ async function downloadFile(id,name){
     setTimeout(()=>URL.revokeObjectURL(url),15000);
   }catch(e){ downloadViaIframe(id); }
 }
+// ---- in-app preview / player (double-click opens like a file manager) ----
+function dlUrl(id){ return API+'/api/files/'+id+'/download?x-cfs-token='+encodeURIComponent(TOKEN||''); }
+function openFile(f){
+  const k=kindOf(f), url=dlUrl(f.id);
+  let body;
+  if(k==='image') body='<img class="viewmedia" src="'+url+'">';
+  else if(k==='video') body='<video class="viewmedia" src="'+url+'" controls autoplay playsinline></video>';
+  else if(k==='audio') body='<div class="viewpad"><audio class="viewaudio" src="'+url+'" controls autoplay></audio></div>';
+  else if(k==='pdf') body='<iframe class="viewframe" src="'+url+'"></iframe>';
+  else if(k==='code'||k==='doc'){ return openText(f); }
+  else { return downloadFile(f.id,f.name); }   // no inline viewer → save it
+  const ov=el('div','overlay show viewer'); ov.id='viewer';
+  ov.innerHTML='<div class="vwrap"><div class="vbar"><b>'+f.name+'</b><span class="vspacer"></span><button class="btn" id="vdl">Download</button><button class="vclose" id="vx"><svg viewBox="0 0 12 12"><line x1="3" y1="3" x2="9" y2="9" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><line x1="9" y1="3" x2="3" y2="9" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></button></div><div class="vbody">'+body+'</div></div>';
+  document.body.appendChild(ov);
+  const close=()=>{ const v=ov.querySelector('video,audio'); if(v){try{v.pause();}catch(_){}} ov.remove(); };
+  ov.addEventListener('click',e=>{ if(e.target===ov) close(); });
+  ov.querySelector('#vx').onclick=close;
+  ov.querySelector('#vdl').onclick=()=>downloadFile(f.id,f.name);
+}
+async function openText(f){
+  const ov=el('div','overlay show viewer'); ov.id='viewer';
+  ov.innerHTML='<div class="vwrap"><div class="vbar"><b>'+f.name+'</b><span class="vspacer"></span><button class="btn" id="vdl">Download</button><button class="vclose" id="vx"><svg viewBox="0 0 12 12"><line x1="3" y1="3" x2="9" y2="9" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><line x1="9" y1="3" x2="3" y2="9" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></button></div><div class="vbody"><pre class="viewtext">loading…</pre></div></div>';
+  document.body.appendChild(ov);
+  ov.addEventListener('click',e=>{ if(e.target===ov) ov.remove(); });
+  ov.querySelector('#vx').onclick=()=>ov.remove();
+  ov.querySelector('#vdl').onclick=()=>downloadFile(f.id,f.name);
+  try{ const r=await fetch(API+'/api/files/'+f.id+'/download',{headers:{'x-cfs-token':TOKEN||''}}); ov.querySelector('.viewtext').textContent=(await r.text()).slice(0,300000); }
+  catch(e){ ov.querySelector('.viewtext').textContent='Could not load this file.'; }
+}
 async function loadFolder(p){
   PATH=p;
   try{
@@ -614,7 +658,7 @@ function renderFiles(){
     else node=el('div','row','<div class="nm">'+iconHtml(f,false)+'<div class="t"><b>'+f.name+'</b></div></div><div class="sz">'+fmtBytes(f.size)+'</div>'+shardBar(f)+'<div class="dt">'+fmtDate(f.created_at)+'</div><div class="rowact"></div>');
     META[k]={el:node,kind:en.kind,data:f};
     node.onclick=e=>{ e.stopPropagation(); selectAt(idx,e); };
-    node.ondblclick=e=>{ e.stopPropagation(); if(isDir){ selectTab('files'); loadFolder(f.path); } else downloadFile(f.id,f.name); };
+    node.ondblclick=e=>{ e.stopPropagation(); if(isDir){ selectTab('files'); loadFolder(f.path); } else openFile(f); };
     node.oncontextmenu=e=>{ e.preventDefault(); e.stopPropagation(); ensureSelected(k,idx); isDir?folderMenu(f,e.clientX,e.clientY):itemMenu(f,e.clientX,e.clientY); };
     node.draggable=true;
     node.ondragstart=ev=>{ ensureSelected(k,idx); ev.dataTransfer.effectAllowed='move'; try{ev.dataTransfer.setData('text/cfs-move','1');}catch(_){}
@@ -769,18 +813,26 @@ async function newFolder(){
   try{ await api('/api/folders',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({path})}); loadFolder(PATH); }catch(e){ alert('Create failed: '+e.message); }
 }
 // uploads with progress
-function uploadFiles(files){
-  [...files].forEach(file=>{
-    const card=el('div','up','<b>'+file.name+'</b><small>uploading to cluster…</small><div class="barwrap"><div class="barfill" style="width:0%"></div></div>');
-    $('#uploads').appendChild(card); const fill=card.querySelector('.barfill'), sub=card.querySelector('small'); let last=0;
-    const fd=new FormData(); fd.append('file',file); fd.append('folder',PATH); fd.append('symlink','');
-    const xhr=new XMLHttpRequest(); xhr.open('POST',API+'/api/files/upload');
-    xhr.setRequestHeader('x-cfs-token',TOKEN||'');
-    xhr.upload.onprogress=e=>{ if(e.lengthComputable) fill.style.width=Math.round(e.loaded/e.total*100)+'%'; bumpUp(e.loaded-last); last=e.loaded; };
-    xhr.onload=()=>{ fill.style.width='100%'; card.querySelector('b').textContent=(xhr.status<300?'✓ ':'✕ ')+file.name; if(sub) sub.textContent=xhr.status<300?'stored · distributing shards':'upload failed'; setTimeout(()=>card.remove(),1800); if(xhr.status<300) loadFolder(PATH); };
-    xhr.onerror=()=>{ card.querySelector('b').textContent='✕ '+file.name; if(sub) sub.textContent='upload failed'; setTimeout(()=>card.remove(),2600); };
-    xhr.send(fd);
-  });
+function upCard(name,note){ const c=el('div','up','<b>'+name+'</b><small>'+(note||'uploading to cluster…')+'</small><div class="barwrap"><div class="barfill" style="width:0%"></div></div>'); $('#uploads').appendChild(c); return c; }
+function uploadOne(file,card){
+  card=card||upCard(file.name);
+  const fill=card.querySelector('.barfill'), sub=card.querySelector('small'), b=card.querySelector('b'); let last=0;
+  if(sub) sub.textContent='uploading to cluster…';
+  const fd=new FormData(); fd.append('file',file); fd.append('folder',PATH); fd.append('symlink','');
+  const xhr=new XMLHttpRequest(); xhr.open('POST',API+'/api/files/upload'); xhr.setRequestHeader('x-cfs-token',TOKEN||'');
+  xhr.upload.onprogress=e=>{ if(e.lengthComputable){ const pct=Math.round(e.loaded/e.total*100); fill.style.width=pct+'%'; if(sub) sub.textContent='uploading '+pct+'% to cluster…'; } bumpUp(e.loaded-last); last=e.loaded; };
+  xhr.onload=()=>{ fill.style.width='100%'; b.textContent=(xhr.status<300?'✓ ':'✕ ')+file.name; if(sub) sub.textContent=xhr.status<300?'stored · distributing shards':'upload failed'; setTimeout(()=>card.remove(),1800); if(xhr.status<300) loadFolder(PATH); };
+  xhr.onerror=()=>{ b.textContent='✕ '+file.name; if(sub) sub.textContent='upload failed'; setTimeout(()=>card.remove(),2600); };
+  xhr.send(fd);
+}
+function uploadFiles(files){ [...files].forEach(f=>uploadOne(f)); }
+// Desktop drop path: show the card immediately, THEN read bytes (which can be
+// slow for a large file) so the user gets instant feedback instead of a hang.
+async function uploadFromPath(path){
+  const name=path.split(/[\\/]/).pop()||'file';
+  const card=upCard(name,'reading file…'); const b=card.querySelector('b'), sub=card.querySelector('small');
+  try{ const buf=await window.__TAURI__.core.invoke('read_dropped',{path}); uploadOne(new File([buf],name),card); }
+  catch(e){ if(sub) sub.textContent='could not read file'; b.textContent='✕ '+name; setTimeout(()=>card.remove(),2600); }
 }
 // ---- transfer rate (this machine; driven by the app's own uploads/downloads) ----
 const RATE={up:0,down:0};
@@ -801,11 +853,9 @@ if(TW && window.__TAURI__ && window.__TAURI__.event){
   const EV=window.__TAURI__.event, INV=window.__TAURI__.core&&window.__TAURI__.core.invoke;
   EV.listen('tauri://drag-enter',()=>{ if(TAB==='files'){ $('#droppath').textContent=PATH||'All Files'; $('#drop').classList.add('show'); } });
   EV.listen('tauri://drag-leave',()=>$('#drop').classList.remove('show'));
-  EV.listen('tauri://drag-drop', async ev=>{
-    $('#drop').classList.remove('show'); if(TAB!=='files'||!INV) return;
-    const paths=(ev.payload&&ev.payload.paths)||[]; const out=[];
-    for(const p of paths){ try{ const buf=await INV('read_dropped',{path:p}); out.push(new File([buf], p.split(/[\\/]/).pop()||'file')); }catch(err){ toast('Could not read '+p); } }
-    if(out.length) uploadFiles(out);
+  EV.listen('tauri://drag-drop', ev=>{
+    $('#drop').classList.remove('show'); if(TAB!=='files') return;
+    ((ev.payload&&ev.payload.paths)||[]).forEach(uploadFromPath);
   });
 }
 // ---- keyboard: delete selection / clear / select-all ----
