@@ -253,6 +253,25 @@
   .viewtext{margin:0;width:100%;height:100%;overflow:auto;padding:18px 20px;font:12.5px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--fg);white-space:pre-wrap;word-break:break-word;background:#0d1017;text-align:left}
   .viewpad{padding:40px}
   .viewaudio{width:60vw;max-width:520px}
+  /* custom video player (MovieTime-style control bar) */
+  .vplayer{position:absolute;inset:0;background:#000;overflow:hidden}
+  .vplayer .vv{width:100%;height:100%;object-fit:contain;display:block;background:#000}
+  .vplayer .vspin{position:absolute;top:50%;left:50%;width:46px;height:46px;margin:-23px;border-radius:50%;border:3px solid rgba(255,255,255,.22);border-top-color:#fff;animation:vspin .8s linear infinite;display:none;pointer-events:none}
+  .vplayer .vspin.on{display:block}
+  @keyframes vspin{to{transform:rotate(360deg)}}
+  .vplayer .vctl{position:absolute;left:0;right:0;bottom:0;display:flex;align-items:center;gap:12px;padding:24px 16px 13px;background:linear-gradient(0deg,rgba(0,0,0,.78),rgba(0,0,0,.35) 55%,transparent);transition:opacity .25s,transform .25s}
+  .vplayer.hide .vctl{opacity:0;transform:translateY(10px);pointer-events:none}
+  .vplayer.hide{cursor:none}
+  .vplayer .vbtn{width:34px;height:34px;display:grid;place-items:center;color:#fff;border-radius:8px;flex:0 0 auto;opacity:.92}
+  .vplayer .vbtn:hover{background:rgba(255,255,255,.16);opacity:1}
+  .vplayer .vbtn svg{width:20px;height:20px}
+  .vplayer .vtime{color:#fff;font-size:12px;font-variant-numeric:tabular-nums;opacity:.9;flex:0 0 auto;min-width:44px;text-align:center}
+  .vplayer .vseek{position:relative;flex:1;height:5px;border-radius:5px;background:rgba(255,255,255,.24);cursor:pointer;transition:height .12s}
+  .vplayer .vseek:hover{height:8px}
+  .vplayer .vbuf{position:absolute;left:0;top:0;bottom:0;background:rgba(255,255,255,.32);border-radius:5px;width:0}
+  .vplayer .vplayed{position:absolute;left:0;top:0;bottom:0;background:var(--accent);border-radius:5px;width:0}
+  .vplayer .vvol{position:relative;width:72px;height:5px;border-radius:5px;background:rgba(255,255,255,.24);cursor:pointer;flex:0 0 auto}
+  .vplayer .vvolf{position:absolute;left:0;top:0;bottom:0;background:#fff;border-radius:5px;width:100%}
   /* ---- settings gear + panel ---- */
   .gear{width:28px;height:28px;border-radius:9px;display:grid;place-items:center;color:var(--muted);transition:.14s}
   .gear:hover{background:rgba(255,255,255,.09);color:var(--fg)}
@@ -518,22 +537,82 @@ async function downloadFile(id,name){
 }
 // ---- in-app preview / player (double-click opens like a file manager) ----
 function dlUrl(id){ return API+'/api/files/'+id+'/download?x-cfs-token='+encodeURIComponent(TOKEN||''); }
+function fmtTime(s){ s=Math.max(0,Math.floor(s||0)); const h=Math.floor(s/3600),m=Math.floor(s%3600/60),ss=s%60; return (h?h+':'+String(m).padStart(2,'0'):m)+':'+String(ss).padStart(2,'0'); }
+const PICO={
+  play:'<svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>',
+  pause:'<svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="5" width="4.2" height="14" rx="1.2"/><rect x="13.8" y="5" width="4.2" height="14" rx="1.2"/></svg>',
+  vol:'<svg viewBox="0 0 24 24" fill="currentColor"><path d="M4 9v6h4l5 4V5L8 9z"/><path d="M16.5 8.5a4.5 4.5 0 0 1 0 7" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>',
+  mute:'<svg viewBox="0 0 24 24" fill="currentColor"><path d="M4 9v6h4l5 4V5L8 9z"/><path d="M16.5 9.5l5 5M21.5 9.5l-5 5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" fill="none"/></svg>',
+  fs:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>',
+};
+// A clean custom player (modelled on MovieTime) — the native WebKitGTK controls
+// render as scattered floating buttons, so we build our own control bar.
+function buildVideoPlayer(url){
+  const wrap=el('div','vplayer');
+  wrap.innerHTML=
+    '<video class="vv" playsinline autoplay></video>'+
+    '<div class="vspin on"></div>'+
+    '<div class="vctl">'+
+      '<button class="vbtn play">'+PICO.play+'</button>'+
+      '<span class="vtime cur">0:00</span>'+
+      '<div class="vseek"><div class="vbuf"></div><div class="vplayed"></div></div>'+
+      '<span class="vtime dur">0:00</span>'+
+      '<button class="vbtn mute">'+PICO.vol+'</button>'+
+      '<div class="vvol"><div class="vvolf"></div></div>'+
+      '<button class="vbtn fs">'+PICO.fs+'</button>'+
+    '</div>';
+  const q=s=>wrap.querySelector(s);
+  const v=q('.vv'), play=q('.play'), seek=q('.vseek'), played=q('.vplayed'), buf=q('.vbuf'),
+        cur=q('.cur'), dur=q('.dur'), mute=q('.mute'), vol=q('.vvol'), volf=q('.vvolf'), fs=q('.fs'), spin=q('.vspin');
+  v.src=url;
+  const icon=()=>play.innerHTML=v.paused?PICO.play:PICO.pause;
+  const toggle=()=>{ v.paused?v.play():v.pause(); };
+  play.onclick=e=>{e.stopPropagation();toggle();}; v.onclick=toggle;
+  v.onplay=icon; v.onpause=icon;
+  v.onwaiting=()=>spin.classList.add('on'); v.onplaying=()=>spin.classList.remove('on'); v.oncanplay=()=>spin.classList.remove('on');
+  v.onloadedmetadata=()=>dur.textContent=fmtTime(v.duration);
+  v.ontimeupdate=()=>{ cur.textContent=fmtTime(v.currentTime); played.style.width=(v.duration?v.currentTime/v.duration*100:0)+'%'; };
+  v.onprogress=()=>{ try{ if(v.buffered.length&&v.duration) buf.style.width=(v.buffered.end(v.buffered.length-1)/v.duration*100)+'%'; }catch(_){} };
+  const seekTo=e=>{ const r=seek.getBoundingClientRect(); if(v.duration) v.currentTime=Math.min(1,Math.max(0,(e.clientX-r.left)/r.width))*v.duration; };
+  let sk=false; seek.onmousedown=e=>{e.stopPropagation();sk=true;seekTo(e);};
+  const setVol=e=>{ const r=vol.getBoundingClientRect(); const x=Math.min(1,Math.max(0,(e.clientX-r.left)/r.width)); v.volume=x; v.muted=x===0; volf.style.width=(x*100)+'%'; mute.innerHTML=v.muted?PICO.mute:PICO.vol; };
+  let vk=false; vol.onmousedown=e=>{e.stopPropagation();vk=true;setVol(e);};
+  wrap._mm=e=>{ if(sk)seekTo(e); if(vk)setVol(e); }; wrap._mu=()=>{sk=false;vk=false;};
+  window.addEventListener('mousemove',wrap._mm); window.addEventListener('mouseup',wrap._mu);
+  mute.onclick=e=>{e.stopPropagation(); v.muted=!v.muted; mute.innerHTML=v.muted?PICO.mute:PICO.vol; volf.style.width=(v.muted?0:v.volume*100)+'%';};
+  volf.style.width='100%';
+  fs.onclick=e=>{e.stopPropagation(); if(document.fullscreenElement)document.exitFullscreen(); else wrap.requestFullscreen&&wrap.requestFullscreen();};
+  let ht; const show=()=>{ wrap.classList.remove('hide'); clearTimeout(ht); ht=setTimeout(()=>{ if(!v.paused) wrap.classList.add('hide'); },2600); };
+  wrap.addEventListener('mousemove',show); show();
+  return wrap;
+}
 function openFile(f){
   const k=kindOf(f), url=dlUrl(f.id);
-  let body;
-  if(k==='image') body='<img class="viewmedia" src="'+url+'">';
-  else if(k==='video') body='<video class="viewmedia" src="'+url+'" controls autoplay playsinline></video>';
-  else if(k==='audio') body='<div class="viewpad"><audio class="viewaudio" src="'+url+'" controls autoplay></audio></div>';
-  else if(k==='pdf') body='<iframe class="viewframe" src="'+url+'"></iframe>';
-  else if(k==='code'||k==='doc'){ return openText(f); }
-  else { return downloadFile(f.id,f.name); }   // no inline viewer → save it
+  if(k==='code'||k==='doc') return openText(f);
+  if(k!=='image'&&k!=='video'&&k!=='audio'&&k!=='pdf') return downloadFile(f.id,f.name);
   const ov=el('div','overlay show viewer'); ov.id='viewer';
-  ov.innerHTML='<div class="vwrap"><div class="vbar"><b>'+f.name+'</b><span class="vspacer"></span><button class="btn" id="vdl">Download</button><button class="vclose" id="vx"><svg viewBox="0 0 12 12"><line x1="3" y1="3" x2="9" y2="9" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><line x1="9" y1="3" x2="3" y2="9" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></button></div><div class="vbody">'+body+'</div></div>';
+  ov.innerHTML='<div class="vwrap"><div class="vbar"><b>'+f.name+'</b><span class="vspacer"></span><button class="btn" id="vdl">Download</button><button class="vclose" id="vx"><svg viewBox="0 0 12 12"><line x1="3" y1="3" x2="9" y2="9" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><line x1="9" y1="3" x2="3" y2="9" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></button></div><div class="vbody"></div></div>';
   document.body.appendChild(ov);
-  const close=()=>{ const v=ov.querySelector('video,audio'); if(v){try{v.pause();}catch(_){}} ov.remove(); };
+  const vbody=ov.querySelector('.vbody');
+  if(k==='image') vbody.innerHTML='<img class="viewmedia" src="'+url+'">';
+  else if(k==='pdf') vbody.innerHTML='<iframe class="viewframe" src="'+url+'"></iframe>';
+  else if(k==='audio') vbody.innerHTML='<div class="viewpad"><audio class="viewaudio" src="'+url+'" controls autoplay></audio></div>';
+  else if(k==='video') vbody.appendChild(buildVideoPlayer(url));
+  const pl=vbody.querySelector('.vplayer');
+  const close=()=>{ const v=ov.querySelector('video,audio'); if(v){try{v.pause();v.removeAttribute('src');v.load();}catch(_){}} if(pl){window.removeEventListener('mousemove',pl._mm);window.removeEventListener('mouseup',pl._mu);} document.removeEventListener('keydown',onkey); ov.remove(); };
+  function onkey(e){
+    if(e.key==='Escape'){ e.preventDefault(); return close(); }
+    const v=ov.querySelector('video'); if(!v) return;
+    if(e.key===' '){ e.preventDefault(); v.paused?v.play():v.pause(); }
+    else if(e.key==='ArrowRight'){ v.currentTime=Math.min(v.duration||1e12,v.currentTime+5); }
+    else if(e.key==='ArrowLeft'){ v.currentTime=Math.max(0,v.currentTime-5); }
+    else if(e.key.toLowerCase()==='m'){ v.muted=!v.muted; }
+    else if(e.key.toLowerCase()==='f'){ if(document.fullscreenElement)document.exitFullscreen(); else pl&&pl.requestFullscreen&&pl.requestFullscreen(); }
+  }
   ov.addEventListener('click',e=>{ if(e.target===ov) close(); });
   ov.querySelector('#vx').onclick=close;
   ov.querySelector('#vdl').onclick=()=>downloadFile(f.id,f.name);
+  document.addEventListener('keydown',onkey);
 }
 async function openText(f){
   const ov=el('div','overlay show viewer'); ov.id='viewer';
@@ -865,6 +944,7 @@ if(TW && window.__TAURI__ && window.__TAURI__.event){
 // ---- keyboard: delete selection / clear / select-all ----
 window.addEventListener('keydown',e=>{
   if(TAB!=='files') return; const t=(e.target.tagName||'').toLowerCase(); if(t==='input'||t==='textarea') return;
+  if(document.getElementById('viewer')||document.getElementById('modal')) return;
   if(e.key==='Delete'||e.key==='Backspace'){ if(SEL.size){ e.preventDefault(); deleteSelection(); } }
   else if(e.key==='Escape'){ clearSel(); }
   else if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='a'){ e.preventDefault(); SEL=new Set(ORDER); applySel(); }

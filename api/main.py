@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import mimetypes
 import os
 import shutil
 import subprocess
@@ -959,6 +960,68 @@ async def delete_file(file_id: str, request: Request) -> Dict[str, bool]:
     return {"deleted": True}
 
 
+def _ranged_file_response(path: Path, request: Request, file_name: str):
+    """Serve a reconstructed file with HTTP Range (206) support.
+
+    The pinned Starlette's FileResponse does not honour Range, so a `<video>`
+    element could never fast-start or seek — it re-fetched (and the node
+    re-reconstructed) the whole file every time. This hand-rolls 206 so media
+    plays immediately and seeks cheaply; a request with no Range still gets the
+    whole file. The media type is guessed from the name so the browser treats a
+    video as a video rather than an opaque download.
+    """
+    size = path.stat().st_size
+    media_type = mimetypes.guess_type(file_name)[0] or "application/octet-stream"
+    rng = request.headers.get("range") or request.headers.get("Range")
+    if rng and rng.strip().startswith("bytes="):
+        try:
+            spec = rng.split("=", 1)[1].split(",")[0].strip()
+            s_txt, _, e_txt = spec.partition("-")
+            start = int(s_txt) if s_txt else 0
+            end = int(e_txt) if e_txt else size - 1
+        except ValueError:
+            start, end = 0, size - 1
+        start = max(0, start)
+        end = min(end, size - 1)
+        if start > end:
+            return Response(
+                status_code=416,
+                headers={"Content-Range": f"bytes */{size}", "Accept-Ranges": "bytes"},
+            )
+        length = end - start + 1
+
+        def _iter():
+            with open(path, "rb") as fh:
+                fh.seek(start)
+                remaining = length
+                while remaining > 0:
+                    block = fh.read(min(262144, remaining))
+                    if not block:
+                        break
+                    remaining -= len(block)
+                    yield block
+
+        return StreamingResponse(
+            _iter(),
+            status_code=206,
+            media_type=media_type,
+            headers={
+                "Content-Range": f"bytes {start}-{end}/{size}",
+                "Content-Length": str(length),
+                "Accept-Ranges": "bytes",
+                "Content-Disposition": f'inline; filename="{file_name}"',
+            },
+        )
+    return FileResponse(
+        str(path),
+        media_type=media_type,
+        headers={
+            "Accept-Ranges": "bytes",
+            "Content-Disposition": f'inline; filename="{file_name}"',
+        },
+    )
+
+
 @app.get("/api/files/{file_id}/download")
 async def download_file(file_id: str, request: Request) -> StreamingResponse:
     data = _read_tree_json(file_id)
@@ -966,24 +1029,36 @@ async def download_file(file_id: str, request: Request) -> StreamingResponse:
         token = _token(request)
         origin = await _origin_of(token, file_id)
         if origin:
-            # Stream straight through from the node that owns the metadata.
+            # Stream straight through from the node that owns the metadata,
+            # forwarding the Range header so video seeks/fast-start work across
+            # the mesh (the origin honours Range and returns 206).
+            fwd = {accounts.TOKEN_HEADER: token}
+            rng = request.headers.get("range") or request.headers.get("Range")
+            if rng:
+                fwd["Range"] = rng
             async with httpx.AsyncClient(timeout=300.0) as client:
                 upstream = await client.get(
-                    f"{origin}/api/files/{file_id}/download",
-                    headers={accounts.TOKEN_HEADER: token},
+                    f"{origin}/api/files/{file_id}/download", headers=fwd
                 )
             if upstream.status_code < 400:
-                async def _relay():
-                    yield upstream.content
-
-                return StreamingResponse(
-                    _relay(),
-                    media_type="application/octet-stream",
-                    headers={
-                        "Content-Disposition": upstream.headers.get(
-                            "content-disposition", 'attachment; filename="download"'
-                        )
-                    },
+                passthru = {
+                    k: v
+                    for k, v in upstream.headers.items()
+                    if k.lower()
+                    in (
+                        "content-range",
+                        "content-length",
+                        "accept-ranges",
+                        "content-disposition",
+                    )
+                }
+                return Response(
+                    content=upstream.content,
+                    status_code=upstream.status_code,
+                    media_type=upstream.headers.get(
+                        "content-type", "application/octet-stream"
+                    ),
+                    headers=passthru,
                 )
         raise HTTPException(status_code=404, detail="File not found")
 
@@ -992,6 +1067,12 @@ async def download_file(file_id: str, request: Request) -> StreamingResponse:
 
     # Try decoder binary first
     if DECODER_PATH.exists() and os.access(str(DECODER_PATH), os.X_OK):
+        # Cache short-circuit: if this file was already reconstructed, serve it
+        # straight away (with Range support). This is what makes seeking and
+        # re-opening a large video instant instead of re-reconstructing it.
+        cached = CACHE_DIR / file_id / file_name
+        if cached.exists() and cached.stat().st_size > 0:
+            return _ranged_file_response(cached, request, file_name)
         # Shards are encrypted at rest and some may live on a peer, so they are
         # collected and decrypted into a staging directory rather than decoded
         # in place — the decoder reads raw files and would happily reconstruct
@@ -1024,22 +1105,10 @@ async def download_file(file_id: str, request: Request) -> StreamingResponse:
                     timeout=300,
                 )
                 if result.returncode == 0 and out_file.exists():
-                    # FileResponse, not StreamingResponse(open(...)): iterating a
-                    # file object yields *newline-delimited* chunks, so binary
-                    # data becomes hundreds of thousands of ~256-byte sends,
-                    # each with a threadpool hop. That alone made a 64 MB read
-                    # take 34s instead of 1.6s. FileResponse sends fixed blocks
-                    # and adds Content-Length.
-                    #
-                    # It does NOT add range support at the pinned Starlette
-                    # (0.35.1); FileResponse gained Range/206 handling only in
-                    # 0.39.0. Ranged reads therefore need either that upgrade or
-                    # a hand-rolled 206 — see docs/PERFORMANCE.md, Phase 4.
-                    return FileResponse(
-                        str(out_file),
-                        media_type="application/octet-stream",
-                        filename=file_name,
-                    )
+                    # Serve with hand-rolled Range (206) support so media plays
+                    # immediately and seeks cheaply; the reconstructed file stays
+                    # cached under CACHE_DIR for subsequent ranged requests.
+                    return _ranged_file_response(out_file, request, file_name)
                 if problems:
                     raise HTTPException(
                         status_code=422,
