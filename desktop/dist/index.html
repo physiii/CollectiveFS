@@ -78,10 +78,13 @@
   .side{width:224px;flex:0 0 auto;padding:18px 14px;border-right:1px solid var(--line);display:flex;flex-direction:column;
     background:linear-gradient(180deg,rgba(255,255,255,.018),transparent)}
   .sidescroll{flex:1;min-height:0;overflow:auto}
-  .sidefoot{flex:0 0 auto;border-top:1px solid var(--line);padding-top:10px;margin-top:8px;-webkit-user-select:none;user-select:none}
-  .sidefoot .rate{display:flex;gap:14px;font-size:11px;color:var(--muted2);font-variant-numeric:tabular-nums;margin-bottom:4px;padding:0 8px}
-  .sidefoot .rate .live{color:var(--accent)}
-  .sidefoot .store{font-size:12px;font-weight:600;color:var(--muted);font-variant-numeric:tabular-nums;padding:0 8px 2px}
+  .sidefoot{flex:0 0 auto;padding:12px 12px 8px;border-top:1px solid var(--line2);-webkit-user-select:none;user-select:none}
+  .sidefoot .stbar{height:3px;border-radius:3px;background:rgba(255,255,255,.07);overflow:hidden;margin-bottom:9px}
+  .sidefoot .stbar>div{height:100%;border-radius:3px;background:linear-gradient(90deg,var(--accent),var(--accent2));width:0%;transition:width .4s}
+  .sidefoot .strow{font-size:12px;font-weight:600;color:var(--fg);font-variant-numeric:tabular-nums}
+  .sidefoot .raterow{display:flex;gap:16px;margin-top:6px;font-size:11px;color:var(--muted2);font-variant-numeric:tabular-nums}
+  .sidefoot .raterow .r{transition:color .2s}
+  .sidefoot .raterow .r.live{color:var(--accent)}
   .side h4{margin:2px 8px 9px;font-size:10.5px;letter-spacing:.15em;text-transform:uppercase;color:var(--muted2)}
   .navitem{display:flex;align-items:center;gap:10px;padding:9px 11px;border-radius:11px;color:var(--muted);
     font-weight:560;cursor:pointer;transition:.13s;margin-bottom:2px;white-space:nowrap;overflow:hidden}
@@ -350,8 +353,9 @@
         <div id="places" data-tauri-drag-region></div>
       </div>
       <div class="sidefoot" data-tauri-drag-region>
-        <div class="rate"><span class="up" id="up">↑ 0 B/s</span><span class="down" id="down">↓ 0 B/s</span></div>
-        <div class="store" id="store-line">–</div>
+        <div class="stbar"><div id="store-bar"></div></div>
+        <div class="strow" id="store-line">–</div>
+        <div class="raterow"><span class="r" id="up">↑ 0 B/s</span><span class="r" id="down">↓ 0 B/s</span></div>
       </div>
     </div>
 
@@ -967,6 +971,7 @@ async function refreshStorage(){
     const ov=await api('/api/system/overview');
     const net=await networkStorage(ov);
     const sl=$('#store-line'); if(sl) sl.textContent=fmtBytes(net.used)+' of '+fmtBytes(net.pledged);
+    const sb=$('#store-bar'); if(sb) sb.style.width=(net.pledged?Math.min(100,net.used/net.pledged*100):0)+'%';
   }catch(e){}
 }
 
