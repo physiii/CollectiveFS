@@ -4,12 +4,14 @@ import logging
 import mimetypes
 import os
 import shutil
+import socket
 import subprocess
 import tempfile
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+from urllib.parse import urlparse
 
 import httpx
 
@@ -106,6 +108,9 @@ NODE_ID = _resolve_node_id()
 # Where this node can be reached by peers. Needed before shards can be handed
 # out, since a peer has to be able to hand them back.
 OWN_URL = os.environ.get("OWN_URL", "").rstrip("/")
+
+# DNS-SD service type nodes advertise and clients browse for zero-config setup.
+SERVICE_TYPE = "_collectivefs._tcp.local."
 
 log = logging.getLogger("collectivefs")
 
@@ -1009,7 +1014,7 @@ def _ranged_file_response(path: Path, request: Request, file_name: str):
                 "Content-Range": f"bytes {start}-{end}/{size}",
                 "Content-Length": str(length),
                 "Accept-Ranges": "bytes",
-                "Content-Disposition": f'inline; filename="{file_name}"',
+                "Content-Disposition": "inline",
             },
         )
     return FileResponse(
@@ -1017,7 +1022,7 @@ def _ranged_file_response(path: Path, request: Request, file_name: str):
         media_type=media_type,
         headers={
             "Accept-Ranges": "bytes",
-            "Content-Disposition": f'inline; filename="{file_name}"',
+            "Content-Disposition": "inline",
         },
     )
 
@@ -1580,6 +1585,93 @@ async def _start_discovery():
     if OWN_URL and _discovery_task is None:
         _discovery_task = asyncio.create_task(_discovery_loop())
         log.info("peer discovery loop started (interval=%ss)", PEER_DISCOVERY_INTERVAL)
+
+
+# ---------------------------------------------------------------------------
+# mDNS / DNS-SD advertisement: zero-config bootstrap for fresh clients
+# ---------------------------------------------------------------------------
+#
+# Gossip (above) grows the node-to-node mesh from any one seed, but a brand-new
+# client — the desktop app, a `cfs_mount`, a phone on the LAN — still has to
+# find that first node. Advertising `_collectivefs._tcp` over multicast DNS
+# lets it be discovered with no configuration at all: clients browse the
+# service type and get our URL + node_id back. Best-effort and fully optional —
+# if zeroconf is not installed, or CFS_MDNS=0, or the network carries no
+# multicast, the node runs exactly as before and clients fall back to seeds.
+
+MDNS_ENABLE = os.environ.get("CFS_MDNS", "1").lower() not in ("0", "false", "no")
+_zeroconf = None
+_mdns_info = None
+
+
+def _primary_ip() -> str:
+    """This host's LAN-facing IPv4, without resolving a (often 127.0.1.1) name.
+
+    Opening a UDP socket toward a routable address makes the kernel pick the
+    outbound interface; no packet is actually sent.
+    """
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        s.connect(("192.0.2.1", 9))  # TEST-NET-1: guaranteed unroutable
+        return s.getsockname()[0]
+    except OSError:
+        return "127.0.0.1"
+    finally:
+        s.close()
+
+
+def _advertise_mdns() -> None:
+    global _zeroconf, _mdns_info
+    if not MDNS_ENABLE:
+        return
+    try:
+        from zeroconf import ServiceInfo, Zeroconf
+    except ImportError:
+        log.info("mDNS advertisement skipped (zeroconf not installed)")
+        return
+    try:
+        port = PORT
+        host = _primary_ip()
+        if OWN_URL:
+            parsed = urlparse(OWN_URL)
+            port = parsed.port or port
+            if parsed.hostname and not parsed.hostname.replace(".", "").isalpha():
+                try:
+                    host = socket.gethostbyname(parsed.hostname)
+                except OSError:
+                    pass
+        url = OWN_URL or f"http://{host}:{port}"
+        info = ServiceInfo(
+            SERVICE_TYPE,
+            f"cfs-{NODE_ID[:8]}.{SERVICE_TYPE}",
+            addresses=[socket.inet_aton(host)],
+            port=port,
+            properties={"node_id": NODE_ID, "url": url, "version": app.version},
+            server=f"cfs-{NODE_ID[:8]}.local.",
+        )
+        zc = Zeroconf()
+        zc.register_service(info)
+        _zeroconf, _mdns_info = zc, info
+        log.info("mDNS: advertising %s at %s (node %s)", SERVICE_TYPE, url, NODE_ID[:8])
+    except Exception:  # noqa: BLE001 — never let discovery break the node
+        log.exception("mDNS advertisement failed; continuing without it")
+
+
+@app.on_event("startup")
+async def _start_mdns():
+    _advertise_mdns()
+
+
+@app.on_event("shutdown")
+async def _stop_mdns():
+    global _zeroconf, _mdns_info
+    if _zeroconf is not None:
+        try:
+            if _mdns_info is not None:
+                _zeroconf.unregister_service(_mdns_info)
+        finally:
+            _zeroconf.close()
+        _zeroconf, _mdns_info = None, None
 
 
 # ---------------------------------------------------------------------------
