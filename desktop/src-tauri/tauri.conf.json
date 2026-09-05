@@ -23,7 +23,7 @@
         "minimizable": true,
         "closable": true,
         "center": true,
-        "dragDropEnabled": false,
+        "dragDropEnabled": true,
         "backgroundColor": "#0b0e14",
         "decorations": false,
         "transparent": false

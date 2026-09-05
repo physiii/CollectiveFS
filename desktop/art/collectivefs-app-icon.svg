@@ -1,44 +1,34 @@
-<svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
   <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#161d33"/>
-      <stop offset="1" stop-color="#0a0d16"/>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#edf0f6"/>
     </linearGradient>
-    <linearGradient id="mesh" x1="0" y1="0" x2="1" y2="1">
+    <linearGradient id="teal" x1="0" y1="0" x2="1" y2="1">
       <stop offset="0" stop-color="#5ee0c8"/>
       <stop offset="1" stop-color="#6d6cf0"/>
     </linearGradient>
-    <radialGradient id="glow" cx="0.5" cy="0.42" r="0.6">
-      <stop offset="0" stop-color="#5ee0c8" stop-opacity="0.20"/>
-      <stop offset="1" stop-color="#5ee0c8" stop-opacity="0"/>
-    </radialGradient>
+    <linearGradient id="indigo" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#8f8ef5"/>
+      <stop offset="1" stop-color="#6d6cf0"/>
+    </linearGradient>
   </defs>
 
-  <!-- rounded-square app tile -->
-  <rect x="0" y="0" width="1024" height="1024" rx="228" fill="url(#bg)"/>
-  <rect x="0" y="0" width="1024" height="1024" rx="228" fill="url(#glow)"/>
-  <rect x="8" y="8" width="1008" height="1008" rx="222" fill="none" stroke="#2a3450" stroke-width="4" opacity="0.5"/>
+  <!-- white background tile (OS masks the corners) -->
+  <rect width="1024" height="1024" rx="228" fill="url(#bg)"/>
 
-  <!-- mesh: hub + 6 nodes -->
-  <g transform="translate(512,512)">
-    <g stroke="url(#mesh)" stroke-width="26" stroke-linecap="round" opacity="0.9">
-      <line x1="0" y1="0" x2="0" y2="-232"/>
-      <line x1="0" y1="0" x2="201" y2="-116"/>
-      <line x1="0" y1="0" x2="201" y2="116"/>
-      <line x1="0" y1="0" x2="0" y2="232"/>
-      <line x1="0" y1="0" x2="-201" y2="116"/>
-      <line x1="0" y1="0" x2="-201" y2="-116"/>
-    </g>
-    <g fill="url(#mesh)">
-      <circle cx="0" cy="-232" r="52"/>
-      <circle cx="201" cy="-116" r="52"/>
-      <circle cx="201" cy="116" r="52"/>
-      <circle cx="0" cy="232" r="52"/>
-      <circle cx="-201" cy="116" r="52"/>
-      <circle cx="-201" cy="-116" r="52"/>
-    </g>
-    <!-- hub -->
-    <circle cx="0" cy="0" r="82" fill="#0a0d16" stroke="url(#mesh)" stroke-width="30"/>
-    <circle cx="0" cy="0" r="26" fill="url(#mesh)"/>
-  </g>
+  <!-- soft shadow beneath the stack -->
+  <ellipse cx="512" cy="792" rx="260" ry="34" fill="#6d6cf0" opacity="0.12"/>
+
+  <!-- back folder, peeking behind -->
+  <path d="M338 352 h150 a30 30 0 0 1 21 9 l40 41 h176 a48 48 0 0 1 48 48 v150 a48 48 0 0 1-48 48 H338 a48 48 0 0 1-48-48 V400 a48 48 0 0 1 48-48 Z"
+        fill="url(#indigo)" opacity="0.45"/>
+
+  <!-- front folder -->
+  <path d="M300 430 h150 a32 32 0 0 1 23 10 l44 46 h214 a54 54 0 0 1 54 54 v190 a54 54 0 0 1-54 54 H300 a54 54 0 0 1-54-54 V484 a54 54 0 0 1 54-54 Z"
+        fill="url(#teal)"/>
+
+  <!-- subtle highlight on the front lip -->
+  <path d="M246 556 h532 v-18 a54 54 0 0 0-54-54 H517 l-44-46 a32 32 0 0 0-23-10 H300 a54 54 0 0 0-54 54 Z"
+        fill="#ffffff" opacity="0.16"/>
 </svg>
