@@ -8,5 +8,11 @@ pydantic==2.5.3
 sse-starlette==1.8.2
 websockets==12.0
 httpx==0.27.0
-psutil==5.9.8
+# psutil 5.9.8 has no arm64 wheel and won't compile in python:3.11-slim, so the
+# arm64 build (the macOS node under Docker) uses a wheeled release. x86_64 peers
+# (sonic/office) keep the exact proven pin. Only these stable calls are used:
+# cpu_percent/cpu_count/virtual_memory/swap_memory/boot_time/net_io_counters/
+# net_if_stats — unchanged across 5.9 → 7.x.
+psutil==5.9.8; platform_machine == "x86_64" or platform_machine == "AMD64"
+psutil>=6.0.0; platform_machine == "aarch64" or platform_machine == "arm64"
 pytest-asyncio==0.23.3

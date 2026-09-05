@@ -1,0 +1,76 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "CollectiveFS",
+  "version": "1.0.0",
+  "identifier": "com.collectivefs.desktop",
+  "build": {
+    "beforeDevCommand": "",
+    "devUrl": "http://localhost:8010",
+    "beforeBuildCommand": "",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "CollectiveFS",
+        "width": 1280,
+        "height": 820,
+        "minWidth": 900,
+        "minHeight": 560,
+        "resizable": true,
+        "maximizable": true,
+        "minimizable": true,
+        "closable": true,
+        "center": true,
+        "dragDropEnabled": false,
+        "backgroundColor": "#0b0e14",
+        "decorations": false,
+        "transparent": false
+      }
+    ],
+    "security": {
+      "csp": null
+    },
+    "withGlobalTauri": true
+  },
+  "bundle": {
+    "active": true,
+    "targets": [
+      "deb",
+      "appimage"
+    ],
+    "createUpdaterArtifacts": false,
+    "category": "Utility",
+    "publisher": "CollectiveFS",
+    "shortDescription": "CollectiveFS distributed file browser and node console",
+    "longDescription": "CollectiveFS is a native desktop client for a CollectiveFS node: a distributed, encrypted, erasure-coded file browser with drag-and-drop upload plus live read/write throughput and storage/shard-durability metrics. It wraps the node console in a fast native webview on macOS and Ubuntu.",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "linux": {
+      "deb": {
+        "depends": [
+          "libwebkit2gtk-4.1-0"
+        ],
+        "desktopTemplate": "deb/CollectiveFS.desktop.hbs",
+        "files": {
+          "/usr/share/metainfo/com.collectivefs.desktop.metainfo.xml": "metainfo/com.collectivefs.desktop.metainfo.xml",
+          "/usr/share/doc/collectivefs-desktop/copyright": "deb/copyright",
+          "/usr/share/icons/hicolor/32x32/apps/com.collectivefs.desktop.png": "icons/32x32.png",
+          "/usr/share/icons/hicolor/128x128/apps/com.collectivefs.desktop.png": "icons/128x128.png",
+          "/usr/share/icons/hicolor/256x256@2/apps/com.collectivefs.desktop.png": "icons/128x128@2x.png"
+        }
+      },
+      "appimage": {
+        "files": {
+          "/usr/share/icons/hicolor/256x256/apps/com.collectivefs.desktop.png": "icons/128x128@2x.png"
+        }
+      }
+    }
+  }
+}

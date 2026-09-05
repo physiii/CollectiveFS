@@ -1,0 +1,7 @@
+/node_modules
+/src-tauri/target
+/src-tauri/gen/schemas
+
+# The root .gitignore ignores dist/ globally, but this dist/ is the committed
+# splash used as frontendDist — keep it.
+!/dist/

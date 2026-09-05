@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 import os
 import shutil
 import subprocess
@@ -104,6 +105,8 @@ NODE_ID = _resolve_node_id()
 # Where this node can be reached by peers. Needed before shards can be handed
 # out, since a peer has to be able to hand them back.
 OWN_URL = os.environ.get("OWN_URL", "").rstrip("/")
+
+log = logging.getLogger("collectivefs")
 
 
 def _load_fernet():
@@ -1413,7 +1416,7 @@ async def network_view() -> Dict[str, Any]:
         if not peer.get("healthy"):
             continue
         try:
-            async with httpx.AsyncClient(timeout=3.0) as client:
+            async with httpx.AsyncClient(timeout=8.0) as client:
                 r = await client.get(f"{peer['url']}/api/peers/files")
                 if r.status_code == 200:
                     for f in r.json():
@@ -1431,28 +1434,83 @@ async def network_view() -> Dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
-# Startup: announce to known peers
+# Peer discovery: announce, health-check, and gossip on a periodic loop
 # ---------------------------------------------------------------------------
+#
+# The mesh is seeded from PEER_URLS, but a one-shot announce at startup is
+# fragile: nodes that boot at different times never link, and nothing retries —
+# which is exactly how a seeded pair can sit at healthy=false forever. This loop
+# re-announces on an interval (so peering self-heals across restarts) and pulls
+# each healthy peer's own peer list (gossip), so a node reachable from any one
+# seed transitively learns the whole mesh — real auto-discovery.
+
+PEER_DISCOVERY_INTERVAL = float(os.environ.get("PEER_DISCOVERY_INTERVAL", "30"))
+_discovery_task: Optional[asyncio.Task] = None
+
+
+def _is_self(url: str, node_id: str = "") -> bool:
+    if OWN_URL and url.rstrip("/") == OWN_URL:
+        return True
+    return bool(node_id) and node_id == NODE_ID
+
+
+async def _announce_once() -> None:
+    """Tell every known peer we exist and refresh their health."""
+    if not OWN_URL:
+        return
+    payload = {"url": OWN_URL, "node_id": NODE_ID}
+    for peer_url in list(_peers.keys()):
+        if _is_self(peer_url):
+            continue
+        try:
+            async with httpx.AsyncClient(timeout=8.0) as client:
+                r = await client.post(f"{peer_url}/api/peers/register", json=payload)
+            if r.status_code == 200:
+                _peers[peer_url]["healthy"] = True
+                _peers[peer_url]["last_seen"] = datetime.now(timezone.utc).isoformat()
+                _peers[peer_url]["node_id"] = r.json().get("node_id")
+            else:
+                _peers[peer_url]["healthy"] = False
+        except Exception:
+            _peers[peer_url]["healthy"] = False
+
+
+async def _gossip_once() -> None:
+    """Learn peers-of-peers so a single seed grows into the full mesh."""
+    for peer in [p for p in list(_peers.values()) if p.get("healthy")]:
+        try:
+            async with httpx.AsyncClient(timeout=8.0) as client:
+                r = await client.get(f"{peer['url']}/api/peers")
+            if r.status_code != 200:
+                continue
+            for entry in r.json():
+                url = (entry.get("url") or "").rstrip("/")
+                if not url or url in _peers or _is_self(url, entry.get("node_id") or ""):
+                    continue
+                _peers[url] = {"url": url, "node_id": entry.get("node_id"),
+                               "last_seen": None, "healthy": False}
+                log.info("discovered peer %s via %s", url, peer["url"])
+        except Exception:
+            continue
+
+
+async def _discovery_loop() -> None:
+    while True:
+        try:
+            await _announce_once()
+            await _gossip_once()
+        except Exception:
+            log.exception("peer discovery cycle failed")
+        await asyncio.sleep(PEER_DISCOVERY_INTERVAL)
 
 
 @app.on_event("startup")
-async def _startup_announce():
-    """On startup, announce this node's existence to all configured peers."""
-    own_url = os.environ.get("OWN_URL", "")
-    if not own_url or not _peers:
-        return
-    payload = {"url": own_url, "node_id": NODE_ID}
-    for peer_url in list(_peers.keys()):
-        try:
-            async with httpx.AsyncClient(timeout=3.0) as client:
-                r = await client.post(f"{peer_url}/api/peers/register", json=payload)
-                if r.status_code == 200:
-                    _peers[peer_url]["healthy"] = True
-                    _peers[peer_url]["last_seen"] = datetime.now(timezone.utc).isoformat()
-                    resp = r.json()
-                    _peers[peer_url]["node_id"] = resp.get("node_id")
-        except Exception:
-            _peers[peer_url]["healthy"] = False
+async def _start_discovery():
+    """Kick off the background peer-discovery loop (announce + gossip)."""
+    global _discovery_task
+    if OWN_URL and _discovery_task is None:
+        _discovery_task = asyncio.create_task(_discovery_loop())
+        log.info("peer discovery loop started (interval=%ss)", PEER_DISCOVERY_INTERVAL)
 
 
 # ---------------------------------------------------------------------------
@@ -2001,13 +2059,25 @@ async def _stop_contract_enforcement():
 # Static files / SPA catch-all (MUST be last)
 # ---------------------------------------------------------------------------
 
-_UI_DIST = Path(__file__).parent.parent / "ui" / "dist"
+_UI_ROOT = Path(__file__).parent.parent / "ui"
+_UI_DIST = _UI_ROOT / "dist"
+# The console the node serves. `console.html` is the self-contained glass
+# file-browser + performance app (the same single file the desktop shell
+# bundles as its window). It is a source file, not a build artifact, so a
+# `vite build` of the legacy React app in ui/dist cannot clobber it. If it is
+# missing we fall back to the React SPA build for backward compatibility.
+_CONSOLE = _UI_ROOT / "console.html"
 
-if _UI_DIST.exists():
-    app.mount("/assets", StaticFiles(directory=str(_UI_DIST / "assets")), name="assets")
+if _CONSOLE.exists() or _UI_DIST.exists():
+    if _UI_DIST.exists() and (_UI_DIST / "assets").exists():
+        # Legacy React SPA assets — harmless to keep mounted; the glass console
+        # is self-contained and references none of them.
+        app.mount("/assets", StaticFiles(directory=str(_UI_DIST / "assets")), name="assets")
 
     @app.get("/{full_path:path}", include_in_schema=False)
     async def spa_fallback(full_path: str):
+        if _CONSOLE.exists():
+            return FileResponse(str(_CONSOLE))
         index = _UI_DIST / "index.html"
         if index.exists():
             return FileResponse(str(index))
