@@ -1,0 +1,13 @@
+{
+  "//": "CollectiveFS client config. Copy to ~/.config/collectivefs/config.json.",
+  "//node_url": "Set to pin one node explicitly; omit/null to auto-discover.",
+  "node_url": null,
+  "mount_point": "~/CollectiveFS",
+  "discovery": {
+    "//mdns": "Browse _collectivefs._tcp on the LAN (zero-config bootstrap).",
+    "mdns": true,
+    "mdns_timeout": 3.0,
+    "//seeds": "Fallback base URLs for networks without multicast (e.g. NAT'd VMs). The node's gossip mesh grows from any one of these.",
+    "seeds": []
+  }
+}

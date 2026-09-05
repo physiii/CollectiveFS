@@ -28,6 +28,40 @@ fn read_dropped(path: String) -> Result<tauri::ipc::Response, String> {
         .map_err(|e| format!("{path}: {e}"))
 }
 
+/// Bring up the CollectiveFS FUSE mount so every file in the collective is a
+/// real path the OS can open — double-clicking a video in Files launches the
+/// native player, which streams it from the mesh instead of downloading it.
+///
+/// Best-effort and non-blocking: the mount is a convenience, never a launch
+/// gate. On Linux we hand off to the per-user `cfs-mount.service` (it self-heals
+/// and picks its node by mDNS/config), starting it only if it is not already
+/// active so we never disturb a mount the user brought up themselves. macOS
+/// (macFUSE) and Windows (WinFsp) need their own mount backends — tracked
+/// separately — so there we no-op rather than pretend.
+#[cfg(target_os = "linux")]
+fn ensure_mount() {
+    use std::process::Command;
+    let active = Command::new("systemctl")
+        .args(["--user", "is-active", "--quiet", "cfs-mount.service"])
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
+    if active {
+        return;
+    }
+    match Command::new("systemctl")
+        .args(["--user", "start", "cfs-mount.service"])
+        .status()
+    {
+        Ok(s) if s.success() => eprintln!("cfs: mount service started"),
+        Ok(s) => eprintln!("cfs: mount service not started (exit {s}); is it installed?"),
+        Err(e) => eprintln!("cfs: could not invoke systemctl ({e}); skipping mount"),
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+fn ensure_mount() {}
+
 pub fn run() {
     let mut builder = tauri::Builder::default();
 
@@ -39,6 +73,12 @@ pub fn run() {
     }
 
     builder
+        .setup(|_app| {
+            // Off the UI thread: mounting waits on node discovery + FUSE, and
+            // the window must paint regardless of whether a mount comes up.
+            std::thread::spawn(ensure_mount);
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![read_dropped])
         .run(tauri::generate_context!())
         .expect("error while running the CollectiveFS desktop shell");
