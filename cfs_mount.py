@@ -28,7 +28,7 @@ import sys
 import tempfile
 import threading
 import time
-from collections import defaultdict
+from collections import OrderedDict, defaultdict
 from pathlib import Path, PurePosixPath
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -135,6 +135,27 @@ def timed(name: str):
 # ── API client ──────────────────────────────────────────────────────
 
 
+#: Bytes fetched per range request. 1 MiB covers FUSE's 128 KiB readahead
+#: several times over, so sequential playback issues one request per eight
+#: reads rather than one per read.
+READ_BLOCK = 1 << 20
+#: Total block-cache budget. Bounded in bytes so it holds whatever the file
+#: sizes turn out to be.
+READ_CACHE_BYTES = 256 << 20
+
+
+def _runs(indexes: List[int]) -> List[Tuple[int, int]]:
+    """Collapse sorted block indexes into contiguous [start, end] runs."""
+
+    runs: List[Tuple[int, int]] = []
+    for index in indexes:
+        if runs and index == runs[-1][1] + 1:
+            runs[-1] = (runs[-1][0], index)
+        else:
+            runs.append((index, index))
+    return runs
+
+
 class NodeClient:
     """Blocking HTTP calls to the local node, run off the trio thread."""
 
@@ -159,6 +180,25 @@ class NodeClient:
         response = self._client.get(f"/api/files/{file_id}/download")
         response.raise_for_status()
         return response.content
+
+    def download_range(self, file_id: str, start: int, length: int) -> bytes:
+        """Fetch [start, start+length) with one HTTP Range request.
+
+        The node answers 206 from the reconstructed file. A server too old to
+        honour Range replies 200 with the whole body, so the slice is applied
+        here as well and an old node stays correct, just slow.
+        """
+
+        end = start + length - 1
+        response = self._client.get(
+            f"/api/files/{file_id}/download",
+            headers={"Range": f"bytes={start}-{end}"},
+        )
+        response.raise_for_status()
+        payload = response.content
+        if response.status_code != 206:
+            return payload[start:start + length]
+        return payload
 
     def upload(self, name: str, folder: str, payload: bytes,
                symlink: str = "") -> Dict[str, Any]:
@@ -253,7 +293,12 @@ class CollectiveFS(pyfuse3.Operations):
         # until its shards exist, so read-after-write would otherwise fail for
         # as long as encoding takes.
         self._pending: Dict[str, Path] = {}
-        self._read_cache: Dict[str, Tuple[float, bytes]] = {}
+        # Reads are served in fixed blocks fetched over HTTP Range, not whole
+        # files. The old cache held up to 32 *entire* files in RAM -- 8 GB for
+        # 256 MB media -- and expired them after 30s, so playing a video longer
+        # than half a minute re-downloaded all of it mid-playback.
+        self._blocks: "OrderedDict[Tuple[str, int], bytes]" = OrderedDict()
+        self._blocks_bytes = 0
 
         root = Node(ROOT_INODE, "", True)
         self._by_inode[ROOT_INODE] = root
@@ -407,25 +452,88 @@ class CollectiveFS(pyfuse3.Operations):
     # ── read path ───────────────────────────────────────────────────
 
     def _fetch(self, node: Node) -> bytes:
+        """The whole file, for callers that genuinely need all of it."""
+
         pending = self._pending.get(node.file_id)
         if pending is not None:
             try:
                 return pending.read_bytes()
             except OSError:
                 self._pending.pop(node.file_id, None)
-        cached = self._read_cache.get(node.file_id)
-        if cached and (time.time() - cached[0]) < 30:
-            return cached[1]
-        payload = self.client.download(node.file_id)
-        self._read_cache[node.file_id] = (time.time(), payload)
-        # Keep the cache small; this is a convenience layer, not a page cache.
-        if len(self._read_cache) > 32:
-            oldest = min(self._read_cache, key=lambda key: self._read_cache[key][0])
-            self._read_cache.pop(oldest, None)
-        return payload
+        return self.client.download(node.file_id)
+
+    def _read_at(self, node: Node, off: int, size: int) -> bytes:
+        """Serve [off, off+size) from cached blocks, fetching what is missing.
+
+        A player asks for 128 KiB at a time and seeks freely. Fetching the whole
+        file for each of those reads is what made a 64 KiB read of a 420 MB
+        video take 4.3 seconds and hold 420 MB of RAM.
+        """
+
+        pending = self._pending.get(node.file_id)
+        if pending is not None:
+            try:
+                with open(pending, "rb") as handle:
+                    handle.seek(off)
+                    return handle.read(size)
+            except OSError:
+                self._pending.pop(node.file_id, None)
+
+        limit = node.size or 0
+        if limit and off >= limit:
+            return b""
+        if limit:
+            size = min(size, limit - off)
+        if size <= 0:
+            return b""
+
+        first = off // READ_BLOCK
+        last = (off + size - 1) // READ_BLOCK
+        missing = [index for index in range(first, last + 1)
+                   if (node.file_id, index) not in self._blocks]
+        # Contiguous misses become one request; the common case (sequential
+        # playback) is a single range per block rather than one per read.
+        for start_index, end_index in _runs(missing):
+            start = start_index * READ_BLOCK
+            length = (end_index - start_index + 1) * READ_BLOCK
+            if limit:
+                length = min(length, limit - start)
+            if length <= 0:
+                continue
+            payload = self.client.download_range(node.file_id, start, length)
+            for index in range(start_index, end_index + 1):
+                chunk = payload[(index - start_index) * READ_BLOCK:
+                                (index - start_index + 1) * READ_BLOCK]
+                if not chunk:
+                    break
+                self._store_block(node.file_id, index, chunk)
+
+        out = bytearray()
+        for index in range(first, last + 1):
+            block = self._blocks.get((node.file_id, index))
+            if block is None:
+                break
+            self._blocks.move_to_end((node.file_id, index))
+            lo = max(off, index * READ_BLOCK) - index * READ_BLOCK
+            hi = min(off + size, (index + 1) * READ_BLOCK) - index * READ_BLOCK
+            out += block[lo:hi]
+        return bytes(out)
+
+    def _store_block(self, file_id: str, index: int, payload: bytes) -> None:
+        key = (file_id, index)
+        if key in self._blocks:
+            self._blocks_bytes -= len(self._blocks.pop(key))
+        self._blocks[key] = payload
+        self._blocks_bytes += len(payload)
+        # Bounded by bytes, not by file count: the cap holds however large the
+        # files are, which the old 32-whole-files rule did not.
+        while self._blocks_bytes > READ_CACHE_BYTES and self._blocks:
+            _, evicted = self._blocks.popitem(last=False)
+            self._blocks_bytes -= len(evicted)
 
     def _invalidate(self, file_id: str) -> None:
-        self._read_cache.pop(file_id, None)
+        for key in [key for key in self._blocks if key[0] == file_id]:
+            self._blocks_bytes -= len(self._blocks.pop(key))
 
     def _release_pending(self, file_id: str) -> None:
         path = self._pending.pop(file_id, None)
@@ -540,11 +648,10 @@ class CollectiveFS(pyfuse3.Operations):
             if not node.file_id:
                 return b""
             try:
-                blob = await self._in_thread(self._fetch, node)
+                payload = await self._in_thread(self._read_at, node, off, size)
             except httpx.HTTPError as exc:
                 log.error("read %s failed: %s", node.path, exc)
                 raise pyfuse3.FUSEError(errno.EIO)
-            payload = blob[off:off + size]
         self.stats.add_read(len(payload))
         return payload
 
@@ -876,7 +983,8 @@ async def _report_loop(fs: CollectiveFS, mountpoint: str, node_label: str, inter
         payload["mountpoint"] = mountpoint
         payload["node"] = node_label
         payload["files"] = len([n for n in fs._by_path.values() if not n.is_dir])
-        payload["cache_entries"] = len(fs._read_cache)
+        payload["cache_entries"] = len(fs._blocks)
+        payload["cache_bytes"] = fs._blocks_bytes
         try:
             await trio.to_thread.run_sync(lambda: fs.client.report(payload))
         except Exception as exc:  # never let telemetry kill the mount

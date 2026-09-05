@@ -1,5 +1,7 @@
 import asyncio
 import json
+import logging
+import mimetypes
 import os
 import shutil
 import subprocess
@@ -104,6 +106,8 @@ NODE_ID = _resolve_node_id()
 # Where this node can be reached by peers. Needed before shards can be handed
 # out, since a peer has to be able to hand them back.
 OWN_URL = os.environ.get("OWN_URL", "").rstrip("/")
+
+log = logging.getLogger("collectivefs")
 
 
 def _load_fernet():
@@ -956,6 +960,60 @@ async def delete_file(file_id: str, request: Request) -> Dict[str, bool]:
     return {"deleted": True}
 
 
+def _ranged_file_response(path: Path, request: Request, file_name: str):
+    """Serve a reconstructed file with HTTP Range (206) support."""
+    size = path.stat().st_size
+    media_type = mimetypes.guess_type(file_name)[0] or "application/octet-stream"
+    rng = request.headers.get("range") or request.headers.get("Range")
+    if rng and rng.strip().startswith("bytes="):
+        try:
+            spec = rng.split("=", 1)[1].split(",")[0].strip()
+            s_txt, _, e_txt = spec.partition("-")
+            start = int(s_txt) if s_txt else 0
+            end = int(e_txt) if e_txt else size - 1
+        except ValueError:
+            start, end = 0, size - 1
+        start = max(0, start)
+        end = min(end, size - 1)
+        if start > end:
+            return Response(
+                status_code=416,
+                headers={"Content-Range": f"bytes */{size}", "Accept-Ranges": "bytes"},
+            )
+        length = end - start + 1
+
+        def _iter():
+            with open(path, "rb") as fh:
+                fh.seek(start)
+                remaining = length
+                while remaining > 0:
+                    block = fh.read(min(262144, remaining))
+                    if not block:
+                        break
+                    remaining -= len(block)
+                    yield block
+
+        return StreamingResponse(
+            _iter(),
+            status_code=206,
+            media_type=media_type,
+            headers={
+                "Content-Range": f"bytes {start}-{end}/{size}",
+                "Content-Length": str(length),
+                "Accept-Ranges": "bytes",
+                "Content-Disposition": "inline",
+            },
+        )
+    return FileResponse(
+        str(path),
+        media_type=media_type,
+        headers={
+            "Accept-Ranges": "bytes",
+            "Content-Disposition": "inline",
+        },
+    )
+
+
 @app.get("/api/files/{file_id}/download")
 async def download_file(file_id: str, request: Request) -> StreamingResponse:
     data = _read_tree_json(file_id)
@@ -963,24 +1021,36 @@ async def download_file(file_id: str, request: Request) -> StreamingResponse:
         token = _token(request)
         origin = await _origin_of(token, file_id)
         if origin:
-            # Stream straight through from the node that owns the metadata.
+            # Stream straight through from the node that owns the metadata,
+            # forwarding the Range header so video seeks/fast-start work across
+            # the mesh (the origin honours Range and returns 206).
+            fwd = {accounts.TOKEN_HEADER: token}
+            rng = request.headers.get("range") or request.headers.get("Range")
+            if rng:
+                fwd["Range"] = rng
             async with httpx.AsyncClient(timeout=300.0) as client:
                 upstream = await client.get(
-                    f"{origin}/api/files/{file_id}/download",
-                    headers={accounts.TOKEN_HEADER: token},
+                    f"{origin}/api/files/{file_id}/download", headers=fwd
                 )
             if upstream.status_code < 400:
-                async def _relay():
-                    yield upstream.content
-
-                return StreamingResponse(
-                    _relay(),
-                    media_type="application/octet-stream",
-                    headers={
-                        "Content-Disposition": upstream.headers.get(
-                            "content-disposition", 'attachment; filename="download"'
-                        )
-                    },
+                passthru = {
+                    k: v
+                    for k, v in upstream.headers.items()
+                    if k.lower()
+                    in (
+                        "content-range",
+                        "content-length",
+                        "accept-ranges",
+                        "content-disposition",
+                    )
+                }
+                return Response(
+                    content=upstream.content,
+                    status_code=upstream.status_code,
+                    media_type=upstream.headers.get(
+                        "content-type", "application/octet-stream"
+                    ),
+                    headers=passthru,
                 )
         raise HTTPException(status_code=404, detail="File not found")
 
@@ -989,6 +1059,11 @@ async def download_file(file_id: str, request: Request) -> StreamingResponse:
 
     # Try decoder binary first
     if DECODER_PATH.exists() and os.access(str(DECODER_PATH), os.X_OK):
+        # Cache short-circuit: if this file was already reconstructed, serve it
+        # straight away (with Range support) so seeking/re-opening is instant.
+        cached = CACHE_DIR / file_id / file_name
+        if cached.exists() and cached.stat().st_size > 0:
+            return _ranged_file_response(cached, request, file_name)
         # Shards are encrypted at rest and some may live on a peer, so they are
         # collected and decrypted into a staging directory rather than decoded
         # in place — the decoder reads raw files and would happily reconstruct
@@ -1021,22 +1096,10 @@ async def download_file(file_id: str, request: Request) -> StreamingResponse:
                     timeout=300,
                 )
                 if result.returncode == 0 and out_file.exists():
-                    # FileResponse, not StreamingResponse(open(...)): iterating a
-                    # file object yields *newline-delimited* chunks, so binary
-                    # data becomes hundreds of thousands of ~256-byte sends,
-                    # each with a threadpool hop. That alone made a 64 MB read
-                    # take 34s instead of 1.6s. FileResponse sends fixed blocks
-                    # and adds Content-Length.
-                    #
-                    # It does NOT add range support at the pinned Starlette
-                    # (0.35.1); FileResponse gained Range/206 handling only in
-                    # 0.39.0. Ranged reads therefore need either that upgrade or
-                    # a hand-rolled 206 — see docs/PERFORMANCE.md, Phase 4.
-                    return FileResponse(
-                        str(out_file),
-                        media_type="application/octet-stream",
-                        filename=file_name,
-                    )
+                    # Serve with hand-rolled Range (206) support so media plays
+                    # immediately and seeks cheaply; the reconstructed file stays
+                    # cached under CACHE_DIR for subsequent ranged requests.
+                    return _ranged_file_response(out_file, request, file_name)
                 if problems:
                     raise HTTPException(
                         status_code=422,
@@ -1413,7 +1476,7 @@ async def network_view() -> Dict[str, Any]:
         if not peer.get("healthy"):
             continue
         try:
-            async with httpx.AsyncClient(timeout=3.0) as client:
+            async with httpx.AsyncClient(timeout=8.0) as client:
                 r = await client.get(f"{peer['url']}/api/peers/files")
                 if r.status_code == 200:
                     for f in r.json():
@@ -1431,28 +1494,80 @@ async def network_view() -> Dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
-# Startup: announce to known peers
+# Peer discovery: announce, health-check, and gossip on a periodic loop
 # ---------------------------------------------------------------------------
+#
+# The mesh is seeded from PEER_URLS, but a one-shot announce at startup is
+# fragile: nodes that boot at different times never link, and nothing retries —
+# which is exactly how a seeded pair can sit at healthy=false forever. This loop
+# re-announces on an interval (so peering self-heals across restarts) and pulls
+# each healthy peer's own peer list (gossip), so a node reachable from any one
+# seed transitively learns the whole mesh — real auto-discovery.
+
+PEER_DISCOVERY_INTERVAL = float(os.environ.get("PEER_DISCOVERY_INTERVAL", "30"))
+_discovery_task: Optional[asyncio.Task] = None
+
+
+def _is_self(url: str, node_id: str = "") -> bool:
+    if OWN_URL and url.rstrip("/") == OWN_URL:
+        return True
+    return bool(node_id) and node_id == NODE_ID
+
+
+async def _announce_once() -> None:
+    """Tell every known peer we exist and refresh their health."""
+    if not OWN_URL:
+        return
+    payload = {"url": OWN_URL, "node_id": NODE_ID}
+    for peer_url in list(_peers.keys()):
+        if _is_self(peer_url):
+            continue
+        try:
+            async with httpx.AsyncClient(timeout=8.0) as client:
+                r = await client.post(f"{peer_url}/api/peers/register", json=payload)
+            if r.status_code == 200:
+                _peers[peer_url]["healthy"] = True
+                _peers[peer_url]["last_seen"] = datetime.now(timezone.utc).isoformat()
+                _peers[peer_url]["node_id"] = r.json().get("node_id")
+            else:
+                _peers[peer_url]["healthy"] = False
+        except Exception:
+            _peers[peer_url]["healthy"] = False
+
+
+async def _gossip_once() -> None:
+    """Learn peers-of-peers so a single seed grows into the full mesh."""
+    for peer in [p for p in list(_peers.values()) if p.get("healthy")]:
+        try:
+            async with httpx.AsyncClient(timeout=8.0) as client:
+                r = await client.get(f"{peer['url']}/api/peers")
+            if r.status_code != 200:
+                continue
+            for entry in r.json():
+                url = (entry.get("url") or "").rstrip("/")
+                if not url or url in _peers or _is_self(url, entry.get("node_id") or ""):
+                    continue
+                _peers[url] = {"url": url, "node_id": entry.get("node_id"),
+                               "last_seen": None, "healthy": False}
+                log.info("discovered peer %s via %s", url, peer["url"])
+        except Exception:
+            continue
+
+
+async def _discovery_loop() -> None:
+    while True:
+        await _announce_once()
+        await _gossip_once()
+        await asyncio.sleep(PEER_DISCOVERY_INTERVAL)
 
 
 @app.on_event("startup")
-async def _startup_announce():
-    """On startup, announce this node's existence to all configured peers."""
-    own_url = os.environ.get("OWN_URL", "")
-    if not own_url or not _peers:
-        return
-    payload = {"url": own_url, "node_id": NODE_ID}
-    for peer_url in list(_peers.keys()):
-        try:
-            async with httpx.AsyncClient(timeout=3.0) as client:
-                r = await client.post(f"{peer_url}/api/peers/register", json=payload)
-                if r.status_code == 200:
-                    _peers[peer_url]["healthy"] = True
-                    _peers[peer_url]["last_seen"] = datetime.now(timezone.utc).isoformat()
-                    resp = r.json()
-                    _peers[peer_url]["node_id"] = resp.get("node_id")
-        except Exception:
-            _peers[peer_url]["healthy"] = False
+async def _start_discovery():
+    """Kick off the background peer-discovery loop (announce + gossip)."""
+    global _discovery_task
+    if OWN_URL and _discovery_task is None:
+        _discovery_task = asyncio.create_task(_discovery_loop())
+        log.info("peer discovery loop started (interval=%ss)", PEER_DISCOVERY_INTERVAL)
 
 
 # ---------------------------------------------------------------------------
@@ -2001,13 +2116,25 @@ async def _stop_contract_enforcement():
 # Static files / SPA catch-all (MUST be last)
 # ---------------------------------------------------------------------------
 
-_UI_DIST = Path(__file__).parent.parent / "ui" / "dist"
+_UI_ROOT = Path(__file__).parent.parent / "ui"
+_UI_DIST = _UI_ROOT / "dist"
+# The console the node serves. `console.html` is the self-contained glass
+# file-browser + performance app (the same single file the desktop shell
+# bundles as its window). It is a source file, not a build artifact, so a
+# `vite build` of the legacy React app in ui/dist cannot clobber it. If it is
+# missing we fall back to the React SPA build for backward compatibility.
+_CONSOLE = _UI_ROOT / "console.html"
 
-if _UI_DIST.exists():
-    app.mount("/assets", StaticFiles(directory=str(_UI_DIST / "assets")), name="assets")
+if _CONSOLE.exists() or _UI_DIST.exists():
+    if _UI_DIST.exists() and (_UI_DIST / "assets").exists():
+        # Legacy React SPA assets — harmless to keep mounted; the glass console
+        # is self-contained and references none of them.
+        app.mount("/assets", StaticFiles(directory=str(_UI_DIST / "assets")), name="assets")
 
     @app.get("/{full_path:path}", include_in_schema=False)
     async def spa_fallback(full_path: str):
+        if _CONSOLE.exists():
+            return FileResponse(str(_CONSOLE))
         index = _UI_DIST / "index.html"
         if index.exists():
             return FileResponse(str(index))
