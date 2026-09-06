@@ -1027,6 +1027,177 @@ def _ranged_file_response(path: Path, request: Request, file_name: str):
     )
 
 
+# ---------------------------------------------------------------------------
+# Streaming reads: serve a byte range from just the data shards it overlaps
+# ---------------------------------------------------------------------------
+#
+# klauspost Split gives contiguous data shards — data shard i is exactly
+# original bytes [i*per, (i+1)*per) (the last zero-padded), and Join simply
+# concatenates them. So a Range request never needs the whole file: decrypt only
+# the data shards the range touches and slice them. This sidesteps the whole-file
+# decoder pass (and its 300s timeout) entirely, so a multi-GB movie fast-starts
+# and seeks. The decoder is still the fallback when a data shard is missing and
+# parity must rebuild it.
+_DSHARD_SUBDIR = "_dshards"
+_dshard_locks: Dict[str, asyncio.Lock] = {}
+
+
+def _dshard_lock(key: str) -> asyncio.Lock:
+    lock = _dshard_locks.get(key)
+    if lock is None:
+        lock = asyncio.Lock()
+        _dshard_locks[key] = lock
+    return lock
+
+
+async def _ensure_decrypted_data_shard(
+    file_id: str, index: int, chunk: Dict[str, Any]
+) -> Optional[Path]:
+    """Return a path to data shard `index`, decrypted and cached on disk.
+
+    Reads the shard locally if we hold it, else pulls it from the peer that
+    does, then decrypts once and caches the plaintext (the origin already holds
+    the plaintext, so this exposes nothing new). Returns None if the shard
+    cannot be obtained — the caller then falls back to parity reconstruction.
+    """
+    cache_file = CACHE_DIR / file_id / _DSHARD_SUBDIR / str(index)
+    if cache_file.exists() and cache_file.stat().st_size > 0:
+        return cache_file
+    async with _dshard_lock(f"{file_id}:{index}"):
+        if cache_file.exists() and cache_file.stat().st_size > 0:
+            return cache_file
+
+        payload: Optional[bytes] = None
+        path = Path(chunk.get("path", ""))
+        if path.exists():
+            try:
+                payload = path.read_bytes()
+            except OSError:
+                payload = None
+        if payload is None and chunk.get("peer"):
+            try:
+                async with httpx.AsyncClient(timeout=300.0) as client:
+                    payload = await replication.fetch_shard(
+                        client, chunk, origin_node=NODE_ID, file_id=file_id, index=index
+                    )
+            except Exception:  # noqa: BLE001 — unreachable peer => fall back
+                payload = None
+        if payload is None:
+            return None
+
+        if chunk.get("encrypted"):
+            fernet = _load_fernet()
+            if fernet is not None:
+                try:
+                    payload = fernet.decrypt(payload)
+                except Exception:  # noqa: BLE001 — bad key/token => fall back
+                    return None
+
+        cache_file.parent.mkdir(parents=True, exist_ok=True)
+        tmp = cache_file.with_suffix(".part")
+        try:
+            tmp.write_bytes(payload)
+            os.replace(str(tmp), str(cache_file))
+        except OSError:
+            tmp.unlink(missing_ok=True)
+            return None
+        return cache_file
+
+
+async def _serve_range_from_shards(
+    data: Dict[str, Any], request: Request, file_name: str
+) -> Optional[Response]:
+    """Serve a Range (or the whole file) from the data shards it overlaps.
+
+    Returns None to tell the caller to fall back to whole-file reconstruction —
+    when the file has no usable data-shard layout, or a needed shard is
+    unavailable and parity is required to rebuild it.
+    """
+    size = int(data.get("size") or 0)
+    data_shards = int(data.get("data_shards") or 0)
+    file_id = data.get("id")
+    if size <= 0 or data_shards <= 0 or not file_id:
+        return None
+
+    dmap: Dict[int, Dict[str, Any]] = {}
+    for chunk in data.get("chunk_list", []):
+        if replication.is_size_sidecar(chunk):
+            continue
+        idx = replication.shard_index(chunk)
+        if idx is not None and 0 <= idx < data_shards:
+            dmap[idx] = chunk
+    if len(dmap) < data_shards:
+        return None  # incomplete data-shard metadata; let the decoder handle it
+
+    per = (size + data_shards - 1) // data_shards  # raw bytes per shard
+    media_type = mimetypes.guess_type(file_name)[0] or "application/octet-stream"
+
+    rng = request.headers.get("range") or request.headers.get("Range")
+    partial = bool(rng and rng.strip().startswith("bytes="))
+    if partial:
+        try:
+            spec = rng.split("=", 1)[1].split(",")[0].strip()
+            s_txt, _, e_txt = spec.partition("-")
+            start = int(s_txt) if s_txt else 0
+            end = int(e_txt) if e_txt else size - 1
+        except ValueError:
+            start, end = 0, size - 1
+        start = max(0, start)
+        end = min(end, size - 1)
+        if start > end:
+            return Response(
+                status_code=416,
+                headers={"Content-Range": f"bytes */{size}", "Accept-Ranges": "bytes"},
+            )
+    else:
+        start, end = 0, size - 1
+
+    # Decrypt/cache every data shard the range overlaps before responding, so an
+    # unavailable shard falls back to the decoder cleanly instead of failing
+    # mid-stream (after headers are already sent).
+    shard_files: Dict[int, Path] = {}
+    for i in range(start // per, end // per + 1):
+        sf = await _ensure_decrypted_data_shard(file_id, i, dmap[i])
+        if sf is None:
+            return None
+        shard_files[i] = sf
+
+    length = end - start + 1
+
+    def _iter():
+        pos = start
+        while pos <= end:
+            i = pos // per
+            base = i * per
+            # never serve past the real file size (the last shard is padded)
+            stop = min(base + per - 1, end, size - 1)
+            with open(shard_files[i], "rb") as fh:
+                fh.seek(pos - base)
+                remaining = stop - pos + 1
+                while remaining > 0:
+                    blk = fh.read(min(262144, remaining))
+                    if not blk:
+                        break
+                    remaining -= len(blk)
+                    pos += len(blk)
+                    yield blk
+            if remaining > 0:  # shard shorter than expected; don't spin
+                pos = stop + 1
+
+    headers = {
+        "Accept-Ranges": "bytes",
+        "Content-Length": str(length),
+        "Content-Disposition": "inline",
+    }
+    status = 200
+    if partial:
+        headers["Content-Range"] = f"bytes {start}-{end}/{size}"
+        status = 206
+    return StreamingResponse(
+        _iter(), status_code=status, media_type=media_type, headers=headers
+    )
+
+
 @app.get("/api/files/{file_id}/download")
 async def download_file(file_id: str, request: Request) -> StreamingResponse:
     data = _read_tree_json(file_id)
@@ -1070,14 +1241,23 @@ async def download_file(file_id: str, request: Request) -> StreamingResponse:
     file_name = data.get("name", "download")
     chunk_list = data.get("chunk_list", [])
 
-    # Try decoder binary first
+    # Fast path: a previous read already reconstructed the whole file.
+    cached = CACHE_DIR / file_id / file_name
+    if cached.exists() and cached.stat().st_size > 0:
+        return _ranged_file_response(cached, request, file_name)
+
+    # Streaming path: serve just the requested byte range from the contiguous
+    # data shards it overlaps, decrypting them on demand. No whole-file
+    # reconstruction and no decoder subprocess — so it is not bounded by the
+    # 300s decode timeout, and a multi-GB movie fast-starts and seeks. Falls
+    # through only when a data shard is missing and parity must rebuild it.
+    streamed = await _serve_range_from_shards(data, request, file_name)
+    if streamed is not None:
+        return streamed
+
+    # Fallback: whole-file reconstruct via the decoder (rebuilds a missing data
+    # shard from parity; also the path for files with no data-shard layout).
     if DECODER_PATH.exists() and os.access(str(DECODER_PATH), os.X_OK):
-        # Cache short-circuit: if this file was already reconstructed, serve it
-        # straight away (with Range support). This is what makes seeking and
-        # re-opening a large video instant instead of re-reconstructing it.
-        cached = CACHE_DIR / file_id / file_name
-        if cached.exists() and cached.stat().st_size > 0:
-            return _ranged_file_response(cached, request, file_name)
         # Shards are encrypted at rest and some may live on a peer, so they are
         # collected and decrypted into a staging directory rather than decoded
         # in place — the decoder reads raw files and would happily reconstruct
