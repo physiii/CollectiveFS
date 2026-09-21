@@ -74,3 +74,10 @@ docker compose up -d # node on :8010
 
 ## Getting a file:
 ![Alt text](/images/CollectiveFS_get_file.png?raw=true "Saving files")
+
+# License
+CollectiveFS is licensed under the GNU General Public License, version 2 only
+(`GPL-2.0-only`). See [LICENSE](LICENSE) for the full text.
+
+Bundled third-party code keeps its original license and copyright notices; for
+example, `reedsolomon/` is MIT-licensed (see `reedsolomon/LICENSE`).
