@@ -2,6 +2,7 @@
   "name": "collectivefs-desktop",
   "version": "1.0.0",
   "private": true,
+  "license": "GPL-2.0-only",
   "description": "CollectiveFS — native desktop client (macOS + Ubuntu) wrapping the CollectiveFS node console via Tauri",
   "scripts": {
     "tauri": "tauri",

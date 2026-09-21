@@ -2,7 +2,7 @@
 <component type="desktop-application">
   <id>com.collectivefs.desktop</id>
   <metadata_license>MIT</metadata_license>
-  <project_license>MIT</project_license>
+  <project_license>GPL-2.0-only</project_license>
   <name>CollectiveFS</name>
   <summary>Distributed file browser and node console for CollectiveFS</summary>
   <description>

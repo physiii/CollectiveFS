@@ -3,7 +3,7 @@ name = "collectivefs-desktop"
 version = "1.0.0"
 description = "CollectiveFS — native desktop client for the CollectiveFS node console"
 authors = ["CollectiveFS"]
-license = "MIT"
+license = "GPL-2.0-only"
 edition = "2021"
 rust-version = "1.77.2"
 
