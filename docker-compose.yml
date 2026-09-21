@@ -44,6 +44,13 @@ services:
       - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN:-}
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
     restart: unless-stopped
+    # This service normally sits around 60 MB. On 2026-09-05 it grew to 18 GB of anon
+    # memory and invoked the global OOM killer, which on a 62 GB host is free to kill
+    # anything -- the sshfs daemon and the media server included. A cap turns that into
+    # one container dying instead of a host-wide outage. Raise it if a real workload
+    # ever needs more; it is a blast-radius limit, not a sizing estimate.
+    mem_limit: 8g
+    memswap_limit: 8g
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
       interval: 30s
