@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>com.collectivefs.desktop</id>
+  <metadata_license>MIT</metadata_license>
+  <project_license>MIT</project_license>
+  <name>CollectiveFS</name>
+  <summary>Distributed file browser and node console for CollectiveFS</summary>
+  <description>
+    <p>
+      CollectiveFS is a native desktop client for a CollectiveFS node: a
+      distributed, encrypted, Reed-Solomon erasure-coded file browser with
+      drag-and-drop upload, plus live read/write throughput and storage and
+      shard-durability metrics. It wraps the node console in a fast native
+      webview.
+    </p>
+  </description>
+  <launchable type="desktop-id">com.collectivefs.desktop.desktop</launchable>
+  <categories>
+    <category>Utility</category>
+    <category>Network</category>
+  </categories>
+</component>

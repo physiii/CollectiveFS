@@ -10,3 +10,6 @@ websockets>=12.0
 httpx>=0.27.0
 mcp>=1.0.0
 psutil>=5.9.8
+
+# mDNS/DNS-SD node advertisement + client discovery (optional at runtime)
+zeroconf>=0.131

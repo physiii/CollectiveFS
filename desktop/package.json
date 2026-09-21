@@ -1,0 +1,17 @@
+{
+  "name": "collectivefs-desktop",
+  "version": "1.0.0",
+  "private": true,
+  "description": "CollectiveFS — native desktop client (macOS + Ubuntu) wrapping the CollectiveFS node console via Tauri",
+  "scripts": {
+    "tauri": "tauri",
+    "dev": "tauri dev",
+    "build": "tauri build",
+    "build:mac": "./scripts/mac-build.sh",
+    "build:linux": "./scripts/desktop-build.sh",
+    "artwork": "./scripts/generate-artwork.sh"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.1.0"
+  }
+}

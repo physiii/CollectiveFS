@@ -1,0 +1,5 @@
+# Extra dependency for the macOS mount (cfs_mount_macos.py).
+# Pairs with the already-installed fuse-t cask (userspace FUSE, no kext).
+# fusepy imports as `fuse`.
+httpx>=0.27.0
+fusepy>=3.0.1

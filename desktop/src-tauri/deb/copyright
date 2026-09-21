@@ -1,0 +1,7 @@
+Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+Upstream-Name: CollectiveFS
+Source: https://github.com/collectivefs
+
+Files: *
+Copyright: 2026 CollectiveFS
+License: MIT
