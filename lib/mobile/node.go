@@ -146,6 +146,17 @@ func Open(config Config) (*Node, error) {
 	if err := os.MkdirAll(filepath.Join(config.Root, "objects"), 0700); err != nil {
 		return nil, err
 	}
+	existing, err := os.ReadDir(filepath.Join(config.Root, "objects"))
+	if err != nil {
+		return nil, err
+	}
+	if len(existing) > 0 {
+		for _, required := range []string{"encryption.key", "node_id"} {
+			if _, err := os.Stat(filepath.Join(config.Root, required)); err != nil {
+				return nil, fmt.Errorf("existing encrypted storage is missing %s; restore the original node backup", required)
+			}
+		}
+	}
 	key, err := secret(filepath.Join(config.Root, "encryption.key"), 32)
 	if err != nil {
 		return nil, err

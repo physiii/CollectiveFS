@@ -177,3 +177,38 @@ func TestWrongShardAADFails(t *testing.T) {
 		t.Fatal("cross-file shard substitution accepted")
 	}
 }
+
+func TestMissingKeysNeverReinitializeExistingObjects(t *testing.T) {
+	for _, name := range []string{"encryption.key", "node_id"} {
+		t.Run(name, func(t *testing.T) {
+			n := fresh(t)
+			payload := []byte("keep the original encrypted history")
+			f := upload(t, n, "alice", "chat-event-preserve.json", payload)
+			path := filepath.Join(n.root, name)
+			original, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err = os.Remove(path); err != nil {
+				t.Fatal(err)
+			}
+			if _, err = Open(Config{Root: n.root}); err == nil {
+				t.Fatal("missing node key or UUID was silently replaced")
+			}
+			if _, err = os.Stat(path); !os.IsNotExist(err) {
+				t.Fatal("a replacement was written")
+			}
+			if err = os.WriteFile(path, original, 0600); err != nil {
+				t.Fatal(err)
+			}
+			reopened, err := Open(Config{Root: n.root})
+			if err != nil {
+				t.Fatal(err)
+			}
+			value, err := reopened.read(f)
+			if err != nil || !bytes.Equal(value, payload) {
+				t.Fatal("original backup did not restore history", err)
+			}
+		})
+	}
+}
