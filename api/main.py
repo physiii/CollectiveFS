@@ -48,6 +48,7 @@ from api.contracts import ContractManager, TIER_CONFIGS, respond_to_challenge
 from api import accounts, agent_service, files_service, fs_metrics, repair, replication, system_service
 from api.config_service import ConfigError, ConfigStore, apply_updates, describe_settings
 from api.files_service import FileTreeError, FolderStore
+from api.atomicfile import write_json_atomic
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -203,8 +204,7 @@ def _read_tree_json(file_id: str) -> Optional[Dict[str, Any]]:
 
 def _write_tree_json(file_id: str, data: Dict[str, Any]) -> None:
     path = TREE_DIR / f"{file_id}.json"
-    with open(path, "w") as fh:
-        json.dump(data, fh, indent=2)
+    write_json_atomic(path, data)
 
 
 def _list_all_tree() -> List[Dict[str, Any]]:
