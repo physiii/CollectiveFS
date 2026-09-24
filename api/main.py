@@ -1,13 +1,17 @@
 import asyncio
 import json
+import logging
+import mimetypes
 import os
 import shutil
+import socket
 import subprocess
 import tempfile
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+from urllib.parse import urlparse
 
 import httpx
 
@@ -105,6 +109,11 @@ NODE_ID = _resolve_node_id()
 # Where this node can be reached by peers. Needed before shards can be handed
 # out, since a peer has to be able to hand them back.
 OWN_URL = os.environ.get("OWN_URL", "").rstrip("/")
+
+# DNS-SD service type nodes advertise and clients browse for zero-config setup.
+SERVICE_TYPE = "_collectivefs._tcp.local."
+
+log = logging.getLogger("collectivefs")
 
 
 def _load_fernet():
@@ -956,6 +965,239 @@ async def delete_file(file_id: str, request: Request) -> Dict[str, bool]:
     return {"deleted": True}
 
 
+def _ranged_file_response(path: Path, request: Request, file_name: str):
+    """Serve a reconstructed file with HTTP Range (206) support.
+
+    The pinned Starlette's FileResponse does not honour Range, so a `<video>`
+    element could never fast-start or seek — it re-fetched (and the node
+    re-reconstructed) the whole file every time. This hand-rolls 206 so media
+    plays immediately and seeks cheaply; a request with no Range still gets the
+    whole file. The media type is guessed from the name so the browser treats a
+    video as a video rather than an opaque download.
+    """
+    size = path.stat().st_size
+    media_type = mimetypes.guess_type(file_name)[0] or "application/octet-stream"
+    rng = request.headers.get("range") or request.headers.get("Range")
+    if rng and rng.strip().startswith("bytes="):
+        try:
+            spec = rng.split("=", 1)[1].split(",")[0].strip()
+            s_txt, _, e_txt = spec.partition("-")
+            start = int(s_txt) if s_txt else 0
+            end = int(e_txt) if e_txt else size - 1
+        except ValueError:
+            start, end = 0, size - 1
+        start = max(0, start)
+        end = min(end, size - 1)
+        if start > end:
+            return Response(
+                status_code=416,
+                headers={"Content-Range": f"bytes */{size}", "Accept-Ranges": "bytes"},
+            )
+        length = end - start + 1
+
+        def _iter():
+            with open(path, "rb") as fh:
+                fh.seek(start)
+                remaining = length
+                while remaining > 0:
+                    block = fh.read(min(262144, remaining))
+                    if not block:
+                        break
+                    remaining -= len(block)
+                    yield block
+
+        return StreamingResponse(
+            _iter(),
+            status_code=206,
+            media_type=media_type,
+            headers={
+                "Content-Range": f"bytes {start}-{end}/{size}",
+                "Content-Length": str(length),
+                "Accept-Ranges": "bytes",
+                "Content-Disposition": "inline",
+            },
+        )
+    return FileResponse(
+        str(path),
+        media_type=media_type,
+        headers={
+            "Accept-Ranges": "bytes",
+            "Content-Disposition": "inline",
+        },
+    )
+
+
+# ---------------------------------------------------------------------------
+# Streaming reads: serve a byte range from just the data shards it overlaps
+# ---------------------------------------------------------------------------
+#
+# klauspost Split gives contiguous data shards — data shard i is exactly
+# original bytes [i*per, (i+1)*per) (the last zero-padded), and Join simply
+# concatenates them. So a Range request never needs the whole file: decrypt only
+# the data shards the range touches and slice them. This sidesteps the whole-file
+# decoder pass (and its 300s timeout) entirely, so a multi-GB movie fast-starts
+# and seeks. The decoder is still the fallback when a data shard is missing and
+# parity must rebuild it.
+_DSHARD_SUBDIR = "_dshards"
+_dshard_locks: Dict[str, asyncio.Lock] = {}
+
+
+def _dshard_lock(key: str) -> asyncio.Lock:
+    lock = _dshard_locks.get(key)
+    if lock is None:
+        lock = asyncio.Lock()
+        _dshard_locks[key] = lock
+    return lock
+
+
+async def _ensure_decrypted_data_shard(
+    file_id: str, index: int, chunk: Dict[str, Any]
+) -> Optional[Path]:
+    """Return a path to data shard `index`, decrypted and cached on disk.
+
+    Reads the shard locally if we hold it, else pulls it from the peer that
+    does, then decrypts once and caches the plaintext (the origin already holds
+    the plaintext, so this exposes nothing new). Returns None if the shard
+    cannot be obtained — the caller then falls back to parity reconstruction.
+    """
+    cache_file = CACHE_DIR / file_id / _DSHARD_SUBDIR / str(index)
+    if cache_file.exists() and cache_file.stat().st_size > 0:
+        return cache_file
+    async with _dshard_lock(f"{file_id}:{index}"):
+        if cache_file.exists() and cache_file.stat().st_size > 0:
+            return cache_file
+
+        payload: Optional[bytes] = None
+        path = Path(chunk.get("path", ""))
+        if path.exists():
+            try:
+                payload = path.read_bytes()
+            except OSError:
+                payload = None
+        if payload is None and chunk.get("peer"):
+            try:
+                async with httpx.AsyncClient(timeout=300.0) as client:
+                    payload = await replication.fetch_shard(
+                        client, chunk, origin_node=NODE_ID, file_id=file_id, index=index
+                    )
+            except Exception:  # noqa: BLE001 — unreachable peer => fall back
+                payload = None
+        if payload is None:
+            return None
+
+        if chunk.get("encrypted"):
+            fernet = _load_fernet()
+            if fernet is not None:
+                try:
+                    payload = fernet.decrypt(payload)
+                except Exception:  # noqa: BLE001 — bad key/token => fall back
+                    return None
+
+        cache_file.parent.mkdir(parents=True, exist_ok=True)
+        tmp = cache_file.with_suffix(".part")
+        try:
+            tmp.write_bytes(payload)
+            os.replace(str(tmp), str(cache_file))
+        except OSError:
+            tmp.unlink(missing_ok=True)
+            return None
+        return cache_file
+
+
+async def _serve_range_from_shards(
+    data: Dict[str, Any], request: Request, file_name: str
+) -> Optional[Response]:
+    """Serve a Range (or the whole file) from the data shards it overlaps.
+
+    Returns None to tell the caller to fall back to whole-file reconstruction —
+    when the file has no usable data-shard layout, or a needed shard is
+    unavailable and parity is required to rebuild it.
+    """
+    size = int(data.get("size") or 0)
+    data_shards = int(data.get("data_shards") or 0)
+    file_id = data.get("id")
+    if size <= 0 or data_shards <= 0 or not file_id:
+        return None
+
+    dmap: Dict[int, Dict[str, Any]] = {}
+    for chunk in data.get("chunk_list", []):
+        if replication.is_size_sidecar(chunk):
+            continue
+        idx = replication.shard_index(chunk)
+        if idx is not None and 0 <= idx < data_shards:
+            dmap[idx] = chunk
+    if len(dmap) < data_shards:
+        return None  # incomplete data-shard metadata; let the decoder handle it
+
+    per = (size + data_shards - 1) // data_shards  # raw bytes per shard
+    media_type = mimetypes.guess_type(file_name)[0] or "application/octet-stream"
+
+    rng = request.headers.get("range") or request.headers.get("Range")
+    partial = bool(rng and rng.strip().startswith("bytes="))
+    if partial:
+        try:
+            spec = rng.split("=", 1)[1].split(",")[0].strip()
+            s_txt, _, e_txt = spec.partition("-")
+            start = int(s_txt) if s_txt else 0
+            end = int(e_txt) if e_txt else size - 1
+        except ValueError:
+            start, end = 0, size - 1
+        start = max(0, start)
+        end = min(end, size - 1)
+        if start > end:
+            return Response(
+                status_code=416,
+                headers={"Content-Range": f"bytes */{size}", "Accept-Ranges": "bytes"},
+            )
+    else:
+        start, end = 0, size - 1
+
+    # Decrypt/cache every data shard the range overlaps before responding, so an
+    # unavailable shard falls back to the decoder cleanly instead of failing
+    # mid-stream (after headers are already sent).
+    shard_files: Dict[int, Path] = {}
+    for i in range(start // per, end // per + 1):
+        sf = await _ensure_decrypted_data_shard(file_id, i, dmap[i])
+        if sf is None:
+            return None
+        shard_files[i] = sf
+
+    length = end - start + 1
+
+    def _iter():
+        pos = start
+        while pos <= end:
+            i = pos // per
+            base = i * per
+            # never serve past the real file size (the last shard is padded)
+            stop = min(base + per - 1, end, size - 1)
+            with open(shard_files[i], "rb") as fh:
+                fh.seek(pos - base)
+                remaining = stop - pos + 1
+                while remaining > 0:
+                    blk = fh.read(min(262144, remaining))
+                    if not blk:
+                        break
+                    remaining -= len(blk)
+                    pos += len(blk)
+                    yield blk
+            if remaining > 0:  # shard shorter than expected; don't spin
+                pos = stop + 1
+
+    headers = {
+        "Accept-Ranges": "bytes",
+        "Content-Length": str(length),
+        "Content-Disposition": "inline",
+    }
+    status = 200
+    if partial:
+        headers["Content-Range"] = f"bytes {start}-{end}/{size}"
+        status = 206
+    return StreamingResponse(
+        _iter(), status_code=status, media_type=media_type, headers=headers
+    )
+
+
 @app.get("/api/files/{file_id}/download")
 async def download_file(file_id: str, request: Request) -> StreamingResponse:
     data = _read_tree_json(file_id)
@@ -963,31 +1205,58 @@ async def download_file(file_id: str, request: Request) -> StreamingResponse:
         token = _token(request)
         origin = await _origin_of(token, file_id)
         if origin:
-            # Stream straight through from the node that owns the metadata.
+            # Stream straight through from the node that owns the metadata,
+            # forwarding the Range header so video seeks/fast-start work across
+            # the mesh (the origin honours Range and returns 206).
+            fwd = {accounts.TOKEN_HEADER: token}
+            rng = request.headers.get("range") or request.headers.get("Range")
+            if rng:
+                fwd["Range"] = rng
             async with httpx.AsyncClient(timeout=300.0) as client:
                 upstream = await client.get(
-                    f"{origin}/api/files/{file_id}/download",
-                    headers={accounts.TOKEN_HEADER: token},
+                    f"{origin}/api/files/{file_id}/download", headers=fwd
                 )
             if upstream.status_code < 400:
-                async def _relay():
-                    yield upstream.content
-
-                return StreamingResponse(
-                    _relay(),
-                    media_type="application/octet-stream",
-                    headers={
-                        "Content-Disposition": upstream.headers.get(
-                            "content-disposition", 'attachment; filename="download"'
-                        )
-                    },
+                passthru = {
+                    k: v
+                    for k, v in upstream.headers.items()
+                    if k.lower()
+                    in (
+                        "content-range",
+                        "content-length",
+                        "accept-ranges",
+                        "content-disposition",
+                    )
+                }
+                return Response(
+                    content=upstream.content,
+                    status_code=upstream.status_code,
+                    media_type=upstream.headers.get(
+                        "content-type", "application/octet-stream"
+                    ),
+                    headers=passthru,
                 )
         raise HTTPException(status_code=404, detail="File not found")
 
     file_name = data.get("name", "download")
     chunk_list = data.get("chunk_list", [])
 
-    # Try decoder binary first
+    # Fast path: a previous read already reconstructed the whole file.
+    cached = CACHE_DIR / file_id / file_name
+    if cached.exists() and cached.stat().st_size > 0:
+        return _ranged_file_response(cached, request, file_name)
+
+    # Streaming path: serve just the requested byte range from the contiguous
+    # data shards it overlaps, decrypting them on demand. No whole-file
+    # reconstruction and no decoder subprocess — so it is not bounded by the
+    # 300s decode timeout, and a multi-GB movie fast-starts and seeks. Falls
+    # through only when a data shard is missing and parity must rebuild it.
+    streamed = await _serve_range_from_shards(data, request, file_name)
+    if streamed is not None:
+        return streamed
+
+    # Fallback: whole-file reconstruct via the decoder (rebuilds a missing data
+    # shard from parity; also the path for files with no data-shard layout).
     if DECODER_PATH.exists() and os.access(str(DECODER_PATH), os.X_OK):
         # Shards are encrypted at rest and some may live on a peer, so they are
         # collected and decrypted into a staging directory rather than decoded
@@ -1021,22 +1290,10 @@ async def download_file(file_id: str, request: Request) -> StreamingResponse:
                     timeout=300,
                 )
                 if result.returncode == 0 and out_file.exists():
-                    # FileResponse, not StreamingResponse(open(...)): iterating a
-                    # file object yields *newline-delimited* chunks, so binary
-                    # data becomes hundreds of thousands of ~256-byte sends,
-                    # each with a threadpool hop. That alone made a 64 MB read
-                    # take 34s instead of 1.6s. FileResponse sends fixed blocks
-                    # and adds Content-Length.
-                    #
-                    # It does NOT add range support at the pinned Starlette
-                    # (0.35.1); FileResponse gained Range/206 handling only in
-                    # 0.39.0. Ranged reads therefore need either that upgrade or
-                    # a hand-rolled 206 — see docs/PERFORMANCE.md, Phase 4.
-                    return FileResponse(
-                        str(out_file),
-                        media_type="application/octet-stream",
-                        filename=file_name,
-                    )
+                    # Serve with hand-rolled Range (206) support so media plays
+                    # immediately and seeks cheaply; the reconstructed file stays
+                    # cached under CACHE_DIR for subsequent ranged requests.
+                    return _ranged_file_response(out_file, request, file_name)
                 if problems:
                     raise HTTPException(
                         status_code=422,
@@ -1413,7 +1670,7 @@ async def network_view() -> Dict[str, Any]:
         if not peer.get("healthy"):
             continue
         try:
-            async with httpx.AsyncClient(timeout=3.0) as client:
+            async with httpx.AsyncClient(timeout=8.0) as client:
                 r = await client.get(f"{peer['url']}/api/peers/files")
                 if r.status_code == 200:
                     for f in r.json():
@@ -1431,28 +1688,170 @@ async def network_view() -> Dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
-# Startup: announce to known peers
+# Peer discovery: announce, health-check, and gossip on a periodic loop
 # ---------------------------------------------------------------------------
+#
+# The mesh is seeded from PEER_URLS, but a one-shot announce at startup is
+# fragile: nodes that boot at different times never link, and nothing retries —
+# which is exactly how a seeded pair can sit at healthy=false forever. This loop
+# re-announces on an interval (so peering self-heals across restarts) and pulls
+# each healthy peer's own peer list (gossip), so a node reachable from any one
+# seed transitively learns the whole mesh — real auto-discovery.
+
+PEER_DISCOVERY_INTERVAL = float(os.environ.get("PEER_DISCOVERY_INTERVAL", "30"))
+_discovery_task: Optional[asyncio.Task] = None
+
+
+def _is_self(url: str, node_id: str = "") -> bool:
+    if OWN_URL and url.rstrip("/") == OWN_URL:
+        return True
+    return bool(node_id) and node_id == NODE_ID
+
+
+async def _announce_once() -> None:
+    """Tell every known peer we exist and refresh their health."""
+    if not OWN_URL:
+        return
+    payload = {"url": OWN_URL, "node_id": NODE_ID}
+    for peer_url in list(_peers.keys()):
+        if _is_self(peer_url):
+            continue
+        try:
+            async with httpx.AsyncClient(timeout=8.0) as client:
+                r = await client.post(f"{peer_url}/api/peers/register", json=payload)
+            if r.status_code == 200:
+                _peers[peer_url]["healthy"] = True
+                _peers[peer_url]["last_seen"] = datetime.now(timezone.utc).isoformat()
+                _peers[peer_url]["node_id"] = r.json().get("node_id")
+            else:
+                _peers[peer_url]["healthy"] = False
+        except Exception:
+            _peers[peer_url]["healthy"] = False
+
+
+async def _gossip_once() -> None:
+    """Learn peers-of-peers so a single seed grows into the full mesh."""
+    for peer in [p for p in list(_peers.values()) if p.get("healthy")]:
+        try:
+            async with httpx.AsyncClient(timeout=8.0) as client:
+                r = await client.get(f"{peer['url']}/api/peers")
+            if r.status_code != 200:
+                continue
+            for entry in r.json():
+                url = (entry.get("url") or "").rstrip("/")
+                if not url or url in _peers or _is_self(url, entry.get("node_id") or ""):
+                    continue
+                _peers[url] = {"url": url, "node_id": entry.get("node_id"),
+                               "last_seen": None, "healthy": False}
+                log.info("discovered peer %s via %s", url, peer["url"])
+        except Exception:
+            continue
+
+
+async def _discovery_loop() -> None:
+    while True:
+        try:
+            await _announce_once()
+            await _gossip_once()
+        except Exception:
+            log.exception("peer discovery cycle failed")
+        await asyncio.sleep(PEER_DISCOVERY_INTERVAL)
 
 
 @app.on_event("startup")
-async def _startup_announce():
-    """On startup, announce this node's existence to all configured peers."""
-    own_url = os.environ.get("OWN_URL", "")
-    if not own_url or not _peers:
+async def _start_discovery():
+    """Kick off the background peer-discovery loop (announce + gossip)."""
+    global _discovery_task
+    if OWN_URL and _discovery_task is None:
+        _discovery_task = asyncio.create_task(_discovery_loop())
+        log.info("peer discovery loop started (interval=%ss)", PEER_DISCOVERY_INTERVAL)
+
+
+# ---------------------------------------------------------------------------
+# mDNS / DNS-SD advertisement: zero-config bootstrap for fresh clients
+# ---------------------------------------------------------------------------
+#
+# Gossip (above) grows the node-to-node mesh from any one seed, but a brand-new
+# client — the desktop app, a `cfs_mount`, a phone on the LAN — still has to
+# find that first node. Advertising `_collectivefs._tcp` over multicast DNS
+# lets it be discovered with no configuration at all: clients browse the
+# service type and get our URL + node_id back. Best-effort and fully optional —
+# if zeroconf is not installed, or CFS_MDNS=0, or the network carries no
+# multicast, the node runs exactly as before and clients fall back to seeds.
+
+MDNS_ENABLE = os.environ.get("CFS_MDNS", "1").lower() not in ("0", "false", "no")
+_zeroconf = None
+_mdns_info = None
+
+
+def _primary_ip() -> str:
+    """This host's LAN-facing IPv4, without resolving a (often 127.0.1.1) name.
+
+    Opening a UDP socket toward a routable address makes the kernel pick the
+    outbound interface; no packet is actually sent.
+    """
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        s.connect(("192.0.2.1", 9))  # TEST-NET-1: guaranteed unroutable
+        return s.getsockname()[0]
+    except OSError:
+        return "127.0.0.1"
+    finally:
+        s.close()
+
+
+def _advertise_mdns() -> None:
+    global _zeroconf, _mdns_info
+    if not MDNS_ENABLE:
         return
-    payload = {"url": own_url, "node_id": NODE_ID}
-    for peer_url in list(_peers.keys()):
+    try:
+        from zeroconf import ServiceInfo, Zeroconf
+    except ImportError:
+        log.info("mDNS advertisement skipped (zeroconf not installed)")
+        return
+    try:
+        port = PORT
+        host = _primary_ip()
+        if OWN_URL:
+            parsed = urlparse(OWN_URL)
+            port = parsed.port or port
+            if parsed.hostname and not parsed.hostname.replace(".", "").isalpha():
+                try:
+                    host = socket.gethostbyname(parsed.hostname)
+                except OSError:
+                    pass
+        url = OWN_URL or f"http://{host}:{port}"
+        info = ServiceInfo(
+            SERVICE_TYPE,
+            f"cfs-{NODE_ID[:8]}.{SERVICE_TYPE}",
+            addresses=[socket.inet_aton(host)],
+            port=port,
+            properties={"node_id": NODE_ID, "url": url, "version": app.version},
+            server=f"cfs-{NODE_ID[:8]}.local.",
+        )
+        zc = Zeroconf()
+        zc.register_service(info)
+        _zeroconf, _mdns_info = zc, info
+        log.info("mDNS: advertising %s at %s (node %s)", SERVICE_TYPE, url, NODE_ID[:8])
+    except Exception:  # noqa: BLE001 — never let discovery break the node
+        log.exception("mDNS advertisement failed; continuing without it")
+
+
+@app.on_event("startup")
+async def _start_mdns():
+    _advertise_mdns()
+
+
+@app.on_event("shutdown")
+async def _stop_mdns():
+    global _zeroconf, _mdns_info
+    if _zeroconf is not None:
         try:
-            async with httpx.AsyncClient(timeout=3.0) as client:
-                r = await client.post(f"{peer_url}/api/peers/register", json=payload)
-                if r.status_code == 200:
-                    _peers[peer_url]["healthy"] = True
-                    _peers[peer_url]["last_seen"] = datetime.now(timezone.utc).isoformat()
-                    resp = r.json()
-                    _peers[peer_url]["node_id"] = resp.get("node_id")
-        except Exception:
-            _peers[peer_url]["healthy"] = False
+            if _mdns_info is not None:
+                _zeroconf.unregister_service(_mdns_info)
+        finally:
+            _zeroconf.close()
+        _zeroconf, _mdns_info = None, None
 
 
 # ---------------------------------------------------------------------------
@@ -2001,13 +2400,25 @@ async def _stop_contract_enforcement():
 # Static files / SPA catch-all (MUST be last)
 # ---------------------------------------------------------------------------
 
-_UI_DIST = Path(__file__).parent.parent / "ui" / "dist"
+_UI_ROOT = Path(__file__).parent.parent / "ui"
+_UI_DIST = _UI_ROOT / "dist"
+# The console the node serves. `console.html` is the self-contained glass
+# file-browser + performance app (the same single file the desktop shell
+# bundles as its window). It is a source file, not a build artifact, so a
+# `vite build` of the legacy React app in ui/dist cannot clobber it. If it is
+# missing we fall back to the React SPA build for backward compatibility.
+_CONSOLE = _UI_ROOT / "console.html"
 
-if _UI_DIST.exists():
-    app.mount("/assets", StaticFiles(directory=str(_UI_DIST / "assets")), name="assets")
+if _CONSOLE.exists() or _UI_DIST.exists():
+    if _UI_DIST.exists() and (_UI_DIST / "assets").exists():
+        # Legacy React SPA assets — harmless to keep mounted; the glass console
+        # is self-contained and references none of them.
+        app.mount("/assets", StaticFiles(directory=str(_UI_DIST / "assets")), name="assets")
 
     @app.get("/{full_path:path}", include_in_schema=False)
     async def spa_fallback(full_path: str):
+        if _CONSOLE.exists():
+            return FileResponse(str(_CONSOLE))
         index = _UI_DIST / "index.html"
         if index.exists():
             return FileResponse(str(index))

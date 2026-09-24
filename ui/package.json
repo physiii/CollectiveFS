@@ -2,6 +2,7 @@
   "name": "collectivefs-ui",
   "version": "0.2.0",
   "private": true,
+  "license": "GPL-2.0-only",
   "type": "module",
   "scripts": {
     "dev": "vite",

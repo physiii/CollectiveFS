@@ -17,7 +17,7 @@
   },
   "keywords": [],
   "author": "",
-  "license": "ISC",
+  "license": "GPL-2.0-only",
   "type": "module",
   "bugs": {
     "url": "https://github.com/physiii/collectivefs/issues"

@@ -50,8 +50,13 @@ COPY lib/ ./lib/
 COPY --from=go-builder /build/lib/encoder ./lib/encoder
 COPY --from=go-builder /build/lib/decoder ./lib/decoder
 
-# Built React frontend
+# Built React frontend (legacy SPA — kept as a fallback)
 COPY --from=ui-builder /app/ui/dist ./ui/dist
+
+# Glass file-browser console the node actually serves (self-contained, no build
+# step). main.py serves this in preference to the React build; it is a source
+# file so a `vite build` cannot clobber it.
+COPY ui/console.html ./ui/console.html
 
 # Make binaries executable
 RUN chmod +x ./lib/encoder ./lib/decoder

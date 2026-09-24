@@ -46,3 +46,9 @@ Thumbs.db
 # Playwright scratch node storage
 .pw-collective/
 test-results/
+
+# Runtime data & logs (local node + fuse mount; never commit)
+.cfs/
+.collective/
+.git-remotes/
+*.log
