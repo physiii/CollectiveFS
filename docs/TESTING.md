@@ -2,6 +2,10 @@
 
 ## Quick reference
 
+Counts and timings below are recorded baselines, not a claim about the current
+checkout. Read each run's result; the cluster baseline includes known failures.
+API and cluster suites change files and configuration, so use disposable nodes.
+
 | Test Tier | Command | Tests | Time | Docker? |
 |-----------|---------|-------|------|---------|
 | **Unit** | `make test-unit` | 245 pass | ~1.5s | No |
@@ -58,14 +62,21 @@ make test-unit && make test-eval
 make test-unit && make test-eval && python benchmarks/run_all.py
 ```
 
-**Full e2e with Docker (~2.5 min):**
+**API e2e with a separate Docker project:**
+
 ```bash
-docker compose -f docker-compose.yml up -d
+CFS_PORT=8021 CFS_PEER_URLS='' AGENT_PROVIDER=builtin \
+  docker compose -p collectivefs-test up -d --build
 curl -sf http://localhost:8021/api/health
 source .venv/bin/activate
-pytest tests/e2e/test_api.py -v
-npx playwright test --project=chromium
+CFS_API_URL=http://localhost:8021 pytest tests/e2e/test_api.py -v
+docker compose -p collectivefs-test down
 ```
+
+This project has its own data volume. `down` keeps that disposable data for
+inspection. Run browser tests separately with `make test-ui`; they start a node
+using `.pw-collective`. Keep their selected port free so the harness cannot reuse
+an unrelated running service.
 
 **Full cluster (~4.5 min):**
 ```bash

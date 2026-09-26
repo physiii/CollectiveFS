@@ -1,13 +1,29 @@
 # CollectiveFS Architecture
 
-CollectiveFS is a distributed, peer-to-peer file storage system. Files are split into shards using Reed-Solomon erasure coding, encrypted with Fernet, and distributed across a network of untrusted peers.
+CollectiveFS is a distributed file storage system. Full nodes split files into
+Reed–Solomon shards, encrypt them with Fernet and distribute them across peers.
+The [Android node](ANDROID.md) uses local AES-GCM shards and a loopback API.
+
+| Topic | Jump to |
+| --- | --- |
+| Write, read and recovery paths | [Data flow](#data-flow), [shard distribution](#shard-distribution) |
+| Storage obligations and HTTP routes | [Peer contracts](#peer-contracts), [API endpoints](#api-endpoints) |
+| User interfaces | [Console](#the-console), [mount](#the-mount) |
+| Identity and administration | [Accounts](#accounts), [configuration](#configuration) |
 
 ## How it works
 
-```
-Upload:   File → Split into 8 data shards → Calculate 4 parity shards → Encrypt each shard → Store
-
-Download: Collect shards → Decrypt → Reed-Solomon reconstruct → Original file
+```mermaid
+flowchart TB
+    File[Uploaded file] --> Encode[8 data and 4 parity shards]
+    Encode --> Encrypt[Encrypt shards]
+    Encrypt --> Storage[Origin and peer storage]
+    Storage --> Verify[Fetch and verify]
+    Verify --> Decrypt[Decrypt required shards]
+    Decrypt --> Intact[Stream intact data shards]
+    Decrypt --> Missing[Reconstruct missing data]
+    Intact --> Download[Downloaded file or range]
+    Missing --> Download
 ```
 
 With 8 data + 4 parity shards, you can lose up to 4 shards and still recover the original file.
@@ -30,10 +46,13 @@ CollectiveFS/
 │   ├── Makefile            ← Build with: cd lib && make
 │   └── go.mod              ← Go module (uses local reedsolomon library)
 ├── reedsolomon/            ← Klaus Post's Reed-Solomon library (Go, vendored)
-├── cfs_fuse.py             ← FUSE filesystem layer (mount as native directory)
+├── cfs_mount.py            ← Current pyfuse3 mount over the HTTP API
+├── cfs_fuse.py             ← Earlier FUSE filesystem implementation
 ├── cfs.py                  ← Original CLI prototype
 ├── mcp_server.py           ← MCP server for Claude Code integration
-├── ui/                     ← React console (Files + System sections)
+├── ui/console.html         ← Current web and desktop file browser
+├── ui/src/                 ← Legacy React console, used as a fallback
+├── desktop/                ← Tauri desktop shell
 ├── tests/                  ← Test suite (see docs/TESTING.md)
 ├── Dockerfile              ← Multi-stage build (Node.js UI + Python runtime)
 ├── docker-compose.yml      ← Single-node Docker setup
@@ -56,8 +75,9 @@ CollectiveFS/
 
 1. **Client** requests `GET /api/files/<id>/download`
 2. **API** reads metadata, locates shards in `~/.collective/proc/<file_id>/`
-3. **Decoder** runs Reed-Solomon reconstruction (tolerates up to 4 missing shards)
-4. **Decrypted** file streamed to client
+3. **Fast path** fetches and decrypts the data shards covering the requested range
+4. **Fallback** gathers and decrypts surviving shards before running the decoder
+5. **Response** streams the file or byte range to the client
 
 ### Storage layout
 
@@ -110,7 +130,9 @@ Default: **8 data shards + 4 parity shards = 12 total**
 | 1-4            | Yes              |
 | 5+             | No               |
 
-With 3 nodes each holding ~4 shards, losing 1 node = losing ~4 shards = exactly at the tolerance boundary.
+With three nodes holding four shards each, losing one storage peer reaches the
+four-shard tolerance boundary. Recovery still needs the origin's metadata and
+encryption key; shard distribution does not replace a backup of that state.
 
 ## Encryption
 
@@ -218,10 +240,19 @@ When a peer is **evicted**, all shards held for that peer are deleted (reciproca
 
 ## The console
 
-The web UI is a section console rather than a conventional file-manager chrome.
-The root page is a stack of section cards; each card has three views behind one
-toggle — **dashboard**, **chat**, and **skill** — plus a collapse control.
-Clicking a section title opens it full-page.
+The API serves `ui/console.html`, the same file browser bundled by the desktop
+shell. It has folder navigation, file previews, upload/download, search,
+list/grid controls, performance and settings. It needs no frontend build step.
+
+| UI source | Role |
+| --- | --- |
+| `ui/console.html` | Primary web and desktop interface |
+| `ui/dist/index.html` | Legacy React fallback, used only when `console.html` is absent |
+
+### Legacy section console
+
+The fallback React app displays section cards with **dashboard**, **chat** and
+**skill** views. Its section routes and agent behavior are documented below.
 
 ```
 /                     ← section cards (Files, then System & Infrastructure)
@@ -229,7 +260,7 @@ Clicking a section title opens it full-page.
 /sections/system      ← full-page infrastructure view
 ```
 
-### Sections and their skills
+### Legacy sections and their skills
 
 Every section is fronted by at least one skill document (`ui/src/lib/skillDocs.js`).
 The skill is not decoration: it is the contract shown in the skill view *and*
@@ -357,11 +388,15 @@ is "less distributed than intended", never data loss. Set
 
 ### Reads reassemble transparently
 
-`GET /api/files/<id>/download` stages every shard into a temp directory — local
-ones read off disk, remote ones fetched from the peer recorded on the chunk and
-checked against their digest — decrypts them, then runs the decoder there.
-Decoding in place would not work: shards are encrypted at rest, and the decoder
-reads raw files, so it would happily reconstruct garbage from ciphertext.
+`GET /api/files/<id>/download` chooses between two paths:
+
+| Condition | Read path |
+| --- | --- |
+| Required data shards are available | Fetch, verify and decrypt them; stream only the requested file range. |
+| A data shard needs reconstruction | Gather surviving shards into a temporary directory, decrypt, then run the decoder. |
+
+The decoder consumes plaintext shards. Encrypted on-disk shards must be
+decrypted before reconstruction.
 
 Deleting a file asks every peer holding one of its shards to drop it first. A
 peer that is down keeps an orphan, which is encrypted and useless without the

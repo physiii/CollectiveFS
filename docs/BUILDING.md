@@ -6,6 +6,7 @@
 |------|---------|------------|
 | Python | 3.10+ | `python3 --version` |
 | Go | 1.22+ | `go version` |
+| Node.js and npm | Node 20+ for the console build | `node --version; npm --version` |
 | Docker | 20+ | `docker --version` |
 | Docker Compose | v2 | `docker compose version` |
 | Make | any | `make --version` |
@@ -28,14 +29,24 @@ source .venv/bin/activate   # on macOS/Linux
 # Install Python dependencies
 pip install -r requirements-test.txt
 
-# Build Go encoder/decoder
+# Build Go encoder/decoder and the console UI
 make build
 
 # Run unit tests to verify
 make test
 ```
 
-That's it. You now have a working CollectiveFS.
+The binaries and UI are built. [Start the API](#3-run-the-api-server-single-node)
+for a local node, or use [Docker](#4-run-with-docker-single-node).
+
+```mermaid
+flowchart LR
+    Python[Install Python dependencies] --> Local[Local API]
+    Go[Build Go binaries] --> Local
+    UI[Build UI] --> Local
+    Source[Repository source] --> Docker[Docker multi-stage build]
+    Docker --> Node[Container on port 8010]
+```
 
 ## Step by step
 
@@ -44,7 +55,7 @@ That's it. You now have a working CollectiveFS.
 The encoder and decoder are Go programs that handle Reed-Solomon erasure coding.
 
 ```bash
-make build
+make build-go
 ```
 
 This produces two binaries under `lib/`:
@@ -90,19 +101,13 @@ Then open http://localhost:8000/api/health — you should see `{"status":"ok","v
 
 ### 4. Run with Docker (single node)
 
-> **Important:** The Docker containers mount the host `lib/` directory and
-> use the pre-built Go binaries. You must run `make build` **before**
-> `docker compose up`. On **macOS**, the host-built binaries are macOS
-> executables that cannot run inside the Linux containers. Cross-compile
-> them first:
->
-> ```bash
-> GOOS=linux GOARCH=amd64 make build    # Intel Linux containers
-> # or: GOOS=linux GOARCH=arm64 make build   # ARM Linux containers
-> ```
+The Dockerfile builds the UI and Linux Go binaries in separate build stages.
+Host-built binaries are not mounted into these containers. Docker builds work
+without running `make build` first, including on macOS.
 
 ```bash
 docker compose up -d --build
+curl -fsS http://localhost:8010/api/health
 ```
 
 ### 5. Run a 3-node cluster
@@ -122,19 +127,21 @@ curl -F "file=@README.md" http://localhost:8001/api/files/upload
 # List files on node1
 curl http://localhost:8001/api/files
 
-# Stop the cluster
-docker compose -f docker-compose.cluster.yml down -v
+# Stop the cluster and keep its data volumes
+docker compose -f docker-compose.cluster.yml down
 ```
 
 ## Makefile targets
 
 | Target | What it does |
 |--------|-------------|
-| `make build` | Build Go encoder/decoder binaries |
+| `make build` | Build Go encoder/decoder and console UI |
+| `make build-go` | Build only Go encoder/decoder binaries |
+| `make build-ui` | Install UI dependencies and build the console bundle |
 | `make build-docker` | Build Docker images for the cluster |
 | `make install` | Install Python dependencies (including test deps) |
 | `make test` | Run unit tests |
 | `make test-eval` | Run evaluation tests (requires Go binaries) |
 | `make test-cluster` | Run cluster tests (requires Docker) |
 | `make test-all` | Run unit + eval tests |
-| `make clean` | Remove binaries, containers, caches |
+| `make clean` | Remove binaries, caches, cluster containers **and cluster data volumes** |

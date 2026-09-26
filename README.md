@@ -1,83 +1,89 @@
-# Objective
-The objective of CollectiveFS is to create a public file system where users can store personal files. I draw from protocols such as BitTorrent and BitCoin to create resilant distributed networks.
+# CollectiveFS
 
-# Description
-The cloud is a cluster of servers owned by a single entity. Typically, their motive is to collect payments directly or from 3rd parties which creates reliability and security risks. CollectiveFS serves to be a public alternative to privately owned cloud storage. Control is distributed among entities who choose to provide disc space in exchange for having their files on the network.
+CollectiveFS stores files across independently operated nodes. Full nodes split
+files into Reed–Solomon shards, encrypt each shard with Fernet, and verify copies
+before handing storage to peers. Android apps can embed a private local replica.
 
-# Hidden in Plain Sight
-File chunks are exchanged with untrusted peers but are encrypted. Symetric keys are used since the encryptor/decryptor are the same entity.
+## Start here
 
-# Similar Projects
-IPFS - Aims to replace IP based HTTP websites with content addressed ones hosted by p2p clusters. They introduce the concept of pinning where you can prioritize data. On CollectiveFS, each byte is as valued as any other byte on the network and parity can be configured so users can choose their desired level of fault tolerance against data erasures. IPFS also uses version control to track file history. On CollectiveFS, there is no version control although this can be implemented at the user level.
+| I want to… | Read |
+| --- | --- |
+| Build or run a node | [Building](docs/BUILDING.md) |
+| Understand storage, recovery and APIs | [Architecture](docs/ARCHITECTURE.md) |
+| Embed storage in an Android app | [Android](docs/ANDROID.md) |
+| Run checks against disposable data | [Testing](docs/TESTING.md) |
+| Review measured performance and proposals | [Performance analysis](docs/PERFORMANCE.md) |
+| Read the original prototype design | [Historical design](DESIGN.md) |
 
-Hadoop - A distributed file system (HDFS) for big data. Used at companies like Facebook. Hadoop must be configured from the top down by a single entity where CollectiveFS is built from the bottom up by the individual nodes.
+## Run a node
 
-Syncthing - Synchronizes files over many nodes using p2p. Only synchronizes between nodes you own therefor is not public.
-
-
-# Technologies
-WebRTC  
-Symmetric Encryption (Fernet)  
-Encoding (ReedSolomon)  
-FUSE  
-
-# Storage
-Files are Reed-Solomon erasure coded, every shard is Fernet-encrypted, and the
-shards are spread across this node and its peers. No peer is given more than
-`parity_shards` of any file, so losing a whole peer stays inside what the code
-can rebuild. A shard only leaves the origin once the peer has echoed back a
-matching digest, and reads pull remote shards home automatically.
-
-```
-upload on node A (8+4)     8 shards -> node A
-                           4 shards -> node B     node B can vanish; A rebuilds
-```
-
-Peering is configured per host in `.env` (see `.env.example`): `CFS_OWN_URL` is
-how peers reach this node, `CFS_PEER_URLS` is who to announce to.
-
-# Performance
-
-`make eval-mount` measures the whole system end to end — throughput by file
-size, per-operation latency, concurrent load, cross-node reconciliation, shard
-placement, degraded reads, proof-of-storage cost, quota saturation and
-console/mount parity — and writes a report to
-`benchmarks/results/mount-eval.md` alongside the raw JSON.
-
-# Console
-Each node serves a console at its own address (`http://<node>:8010/`). It is a
-stack of section cards; every section has a dashboard, a chat, and the skill
-document that governs both.
-
-**Files** is the first section — a file explorer over what this node stores.
-A folder tree, breadcrumbs, list and grid views, and shard availability shown
-next to size, because on an untrusted network *recoverable* matters more than
-*stored*.
-
-**System & Infrastructure** is the second — compute, memory, network, allocated
-storage, shard durability, and peer contracts, with live charts. Its chat can
-change the node rather than only describe it: ask it to allocate more or less
-space, retune the Reed-Solomon data/parity split, or adjust limits, and it
-applies the change against a validated schema and writes it to an audit log.
-
-The agent behind the chats is pluggable — `codewhale` by default, switchable to
-`claude` or `codex` from the UI. See `docs/ARCHITECTURE.md`.
+Docker builds the UI and Linux encoder/decoder inside the image:
 
 ```bash
-make build          # Go encoder/decoder + console UI
-docker compose up -d # node on :8010
+docker compose up -d --build
+curl -fsS http://localhost:8010/api/health
 ```
 
-## Saving a file 
-![Alt text](/images/CollectiveFS_save_file.png?raw=true "Saving files")
+Open **http://localhost:8010/** for the file browser. The `collective_data` volume
+holds the node's key, identity, metadata and shards; back up the whole volume.
 
+For local development:
 
-## Getting a file:
-![Alt text](/images/CollectiveFS_get_file.png?raw=true "Saving files")
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements-test.txt
+make build
+make test
+```
 
-# License
-CollectiveFS is licensed under the GNU General Public License, version 2 only
-(`GPL-2.0-only`). See [LICENSE](LICENSE) for the full text.
+[Building](docs/BUILDING.md) lists prerequisites, API startup and cluster commands.
 
-Bundled third-party code keeps its original license and copyright notices; for
-example, `reedsolomon/` is MIT-licensed (see `reedsolomon/LICENSE`).
+## Where a file goes
+
+```mermaid
+flowchart TB
+    Client[Browser, desktop app or FUSE mount] --> API[Origin node API]
+    API --> Encrypt[Encode 8+4 and encrypt shards]
+    Encrypt --> Local[Origin storage]
+    Encrypt --> Peer[Peer storage]
+    Peer -->|Matching SHA-256 acknowledgement| API
+```
+
+| Rule | Meaning |
+| --- | --- |
+| Default layout: 8 data + 4 parity | Any 8 valid shards can reconstruct the file. |
+| At most 4 shards per peer with the default layout | Losing one storage peer stays within the parity budget. |
+| Verify a peer's digest before dropping the local shard | Failed transfers retain the origin's copy. |
+| Keep the origin's key and metadata | Shards alone do not replace an origin backup. |
+| Android shards stay local | The embedded node uses AES-256-GCM; apps replicate portable file contents over HTTP. |
+
+Configure peering in `.env` using [.env.example](.env.example):
+
+| Setting | Purpose |
+| --- | --- |
+| `CFS_OWN_URL` | This node's address, reachable by other peers. |
+| `CFS_PEER_URLS` | Comma-separated peer addresses to announce to. |
+| `CFS_PORT` | Published host port; default `8010`. |
+
+## Interfaces
+
+| Interface | What it provides |
+| --- | --- |
+| Web and desktop console | Folder navigation, upload/download, previews, search, list/grid views, performance and settings. |
+| FUSE mount | A shared account namespace at `/media/collectivefs`; writes upload on close. |
+| HTTP API | Files, folders, peer storage, quota, contracts and telemetry. |
+| Embedded Android node | Loopback file API, private app storage and a 512 MiB default quota. |
+| Legacy React console | Section dashboards and agent chats; retained as the API's UI fallback. |
+
+## Measure performance
+
+`make eval-mount` exercises throughput, latency, concurrent access, reconciliation,
+shard placement, degraded reads, contracts and quota on the configured mounted
+cluster. It writes [a Markdown report](benchmarks/results/mount-eval.md) and raw
+JSON. See [Testing](docs/TESTING.md) before running checks that change stored data.
+
+## License
+
+CollectiveFS is [GPL-2.0-only](LICENSE). Bundled third-party code keeps its own
+license; [reedsolomon](reedsolomon/LICENSE), for example, is MIT-licensed.

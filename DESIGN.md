@@ -2,6 +2,11 @@
 
 > Last updated: 2026-03-25
 
+This is the **historical prototype design**. Its status and roadmap tables are
+snapshots, not the current implementation. Use [Architecture](docs/ARCHITECTURE.md)
+for the running API, [Android](docs/ANDROID.md) for the embedded node, and
+[Building](docs/BUILDING.md) to start a current checkout.
+
 ---
 
 ## Table of Contents

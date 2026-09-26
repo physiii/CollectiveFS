@@ -1,5 +1,11 @@
 # CollectiveFS — Performance Analysis and Optimization Roadmap
 
+This analysis records the [July 27, 2026 baseline](../benchmarks/results/mount-eval.md)
+and proposed optimizations. Measurements and source line references describe that
+snapshot. Later implementations, including HTTP range reads, may supersede its
+"today" and "not implemented" statements; use [Architecture](ARCHITECTURE.md)
+for current behavior and rerun [the evaluation](TESTING.md) for new measurements.
+
 Every number is marked with its provenance:
 
 - **`[C]`** measured on the live two-node cluster through `/media/collectivefs` (`benchmarks/results/mount-eval.md`)
